@@ -1,1 +1,1 @@
-# new-spotify-plugin
+# spotify-plugin-
