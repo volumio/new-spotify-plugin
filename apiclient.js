@@ -8,3 +8,9 @@ superagent.get('http://127.0.0.1:9876/status')
     .then((results) => {
         console.log(results.body);
     })
+
+superagent.post('http://127.0.0.1:9876/status/next')
+    .accept('application/json')
+    .then((results) => {
+        console.log(results.body);
+    })

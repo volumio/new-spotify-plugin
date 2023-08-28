@@ -9,6 +9,8 @@ var websocket = require('ws');
 var path = require('path');
 var SpotifyWebApi = require('spotify-web-api-node');
 
+var spotifyLocalApiEndpointBase = 'http://127.0.0.1:9876';
+
 // Define the ControllerSpotify class
 module.exports = ControllerSpotify;
 
@@ -20,24 +22,8 @@ function ControllerSpotify(context) {
     this.commandRouter = this.context.coreCommand;
     this.logger = this.context.logger;
     this.configManager = this.context.configManager;
-
-    this.state = {
-        status: 'stop',
-        service: 'spop',
-        title: '',
-        artist: '',
-        album: '',
-        albumart: '/albumart',
-        uri: '',
-        // icon: 'fa fa-spotify',
-        trackType: 'spotify',
-        seek: 0,
-        duration: 0,
-        samplerate: '',
-        bitdepth: '16 bit',
-        bitrate: '',
-        channels: 2
-    };
+    this.isSpotifyPlayingInVolatileMode = false;
+    this.resetSpotifyState();
 }
 
 
@@ -107,14 +93,39 @@ ControllerSpotify.prototype.initializeWsConnection = function () {
     });
 };
 
+
+ControllerSpotify.prototype.resetSpotifyState = function () {
+    var self = this;
+
+    this.state = {
+        status: 'stop',
+        service: 'spop',
+        title: '',
+        artist: '',
+        album: '',
+        albumart: '/albumart',
+        uri: '',
+        // icon: 'fa fa-spotify',
+        trackType: 'spotify',
+        seek: 0,
+        duration: 0,
+        samplerate: '',
+        bitdepth: '16 bit',
+        bitrate: '',
+        channels: 2
+    };
+};
+
 ControllerSpotify.prototype.parseEventState = function (event) {
     var self = this;
 
     // create a switch case which handles types of events
-// and updates the state accordingly
+    // and updates the state accordingly
     switch (event.type) {
         case 'track':
             self.state.title = event.data.name;
+            self.state.duration = self.parseDuration(event.data.duration);
+            self.state.uri = event.data.uri;
             break;
         case 'playing':
             self.state.status = 'play';
@@ -129,8 +140,46 @@ ControllerSpotify.prototype.parseEventState = function (event) {
             self.logger.error('Failed to decode event: ' + event.type);
             break;
     }
-    self.pushState(self.state);
+
+    if (self.isSpotifyPlayingInVolatileMode) {
+        self.pushState(self.state);
+    } else {
+        self.initializeSpotifyPlaybackInVolatileMode();
+    }
 };
+
+ControllerSpotify.prototype.initializeSpotifyPlaybackInVolatileMode = function () {
+    var self = this;
+
+    self.context.coreCommand.stateMachine.setConsumeUpdateService(undefined);
+    self.context.coreCommand.stateMachine.setVolatile({
+        service: 'spop',
+        callback: self.spotConnUnsetVolatile()
+    });
+
+    setTimeout(()=>{
+        self.isSpotifyPlayingInVolatileMode = true;
+        self.pushState(self.state);
+    }, 100)
+};
+
+ControllerSpotify.prototype.parseDuration = function (spotifyDuration) {
+    var self = this;
+
+    try {
+        return parseInt(spotifyDuration/1000);
+    } catch(e) {
+        return 0;
+    }
+}
+
+ControllerSpotify.prototype.spotConnUnsetVolatile = function () {
+    var self = this;
+
+    console.log('UNSET VOLATILE');
+
+    return this.stop();
+}
 
 ControllerSpotify.prototype.getState = function () {
     var self = this;
@@ -145,38 +194,76 @@ ControllerSpotify.prototype.pushState = function (state) {
     return self.commandRouter.servicePushState(self.state, 'spop');
 };
 
+ControllerSpotify.prototype.sendSpotifyLocalApiCommand = function (commandPath) {
+    this.logger.info('Spotify Received pause');
+
+    superagent.post(spotifyLocalApiEndpointBase + commandPath)
+        .accept('application/json')
+        .then((results) => {})
+        .catch((error) => {
+            this.logger.error('Failed to send command to Spotify local API: ' + commandPath  + ': ' + error);
+        });
+};
+
+ControllerSpotify.prototype.sendSpotifyLocalApiCommandWithPayload = function (commandPath, payload) {
+    this.logger.info('Spotify Received pause');
+
+    superagent.post(spotifyLocalApiEndpointBase + commandPath)
+        .accept('application/json')
+        .send(payload)
+        .then((results) => {})
+        .catch((error) => {
+            this.logger.error('Failed to send command to Spotify local API: ' + commandPath  + ': ' + error);
+        });
+};
+
 
 ControllerSpotify.prototype.pause = function () {
     this.logger.info('Spotify Received pause');
 
-    // to implement
+    this.sendSpotifyLocalApiCommand('/status/pause');
 };
 
 ControllerSpotify.prototype.play = function () {
     this.logger.info('Spotify Play');
 
-    // to implement
+    if (this.state.status === 'pause') {
+        this.sendSpotifyLocalApiCommand('/player/resume');
+    } else {
+        this.sendSpotifyLocalApiCommand('/player/play');
+    }
+
 };
+
+ControllerSpotify.prototype.stop = function () {
+    this.logger.info('Spotify Stop');
+
+    this.sendSpotifyLocalApiCommand('/status/pause');
+};
+
 
 ControllerSpotify.prototype.resume = function () {
     this.logger.info('Spotify Resume');
 
-    // to implement
+    this.sendSpotifyLocalApiCommand('/player/resume');
 };
 
 ControllerSpotify.prototype.next = function () {
     this.logger.info('Spotify next');
-    // to implement
+
+    this.sendSpotifyLocalApiCommand('/status/next');
 };
 
 ControllerSpotify.prototype.previous = function () {
     this.logger.info('Spotify previous');
-    // to implement
+
+    this.sendSpotifyLocalApiCommand('/status/prev');
 };
 
 ControllerSpotify.prototype.seek = function (position) {
     this.logger.info('Spotify seek to: ' + position);
-    // to implement
+
+    this.sendSpotifyLocalApiCommandWithPayload('/status/seek', { position: position });
 };
 
 ControllerSpotify.prototype.random = function (value) {
