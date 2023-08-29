@@ -264,7 +264,7 @@ ControllerSpotify.prototype.sendSpotifyLocalApiCommandWithPayload = function (co
 ControllerSpotify.prototype.pause = function () {
     this.logger.info('Spotify Received pause');
 
-    this.sendSpotifyLocalApiCommand('/status/pause');
+    this.sendSpotifyLocalApiCommand('/player/pause');
 };
 
 ControllerSpotify.prototype.play = function () {
