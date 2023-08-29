@@ -10,5 +10,6 @@ server_port: 9876
 audio_device: "volumio"' > config.yml
 
 
-echo "go run ./cmd/daemon" > run.sh
+echo "#!/bin/sh
+/usr/local/go/bin/go run ./cmd/daemon" > run.sh
 chmod a+x run.sh

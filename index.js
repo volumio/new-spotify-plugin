@@ -361,3 +361,30 @@ ControllerSpotify.prototype.stopSocketStateListener = function () {
         self.stateSocket.disconnect();
     }
 };
+
+ControllerSpotify.prototype.createConfigFile = function () {
+    var self = this;
+    var defer = libQ.defer();
+
+    logger.info('Creating Spotify config file');
+
+    var configFileDestinationPath = '/home/volumio/new-spotify-plugin/librespot-go/go-librespot/config.yml';
+
+    try {
+        var template = fs.readFileSync(path.join(__dirname, 'config.yml.tmpl'), {encoding: 'utf8'});
+    } catch (e) {
+        this.logger.error('Failed to read template file: ' + e);
+    }
+
+    var devicename = this.commandRouter.sharedVars.get('system.name');
+
+    const conf = template.replace('${device_name}', devicename);
+
+    fs.writeFile(configFileDestinationPath, conf, (err) => {
+        if (err) {
+            this.logger.error('Failed to write spotify config file: ' + err);
+        } else {
+            this.logger.info('Spotify config file written');
+        }
+    });
+};
