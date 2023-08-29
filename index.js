@@ -238,7 +238,7 @@ ControllerSpotify.prototype.pushState = function (state) {
 };
 
 ControllerSpotify.prototype.sendSpotifyLocalApiCommand = function (commandPath) {
-    this.logger.info('Spotify Received pause');
+    this.logger.info('Sending Spotify command to local API: ' + commandPath);
 
     superagent.post(spotifyLocalApiEndpointBase + commandPath)
         .accept('application/json')
@@ -249,7 +249,7 @@ ControllerSpotify.prototype.sendSpotifyLocalApiCommand = function (commandPath) 
 };
 
 ControllerSpotify.prototype.sendSpotifyLocalApiCommandWithPayload = function (commandPath, payload) {
-    this.logger.info('Spotify Received pause');
+    this.logger.info('Sending Spotify command with payload to local API: ' + commandPath);
 
     superagent.post(spotifyLocalApiEndpointBase + commandPath)
         .accept('application/json')
