@@ -8,8 +8,11 @@ var os = require('os');
 var websocket = require('ws');
 var path = require('path');
 var SpotifyWebApi = require('spotify-web-api-node');
+var io = require('socket.io-client');
 
 var spotifyLocalApiEndpointBase = 'http://127.0.0.1:9876';
+var stateSocket = undefined;
+var currentSpotifyVolume = undefined;
 
 // Define the ControllerSpotify class
 module.exports = ControllerSpotify;
@@ -42,7 +45,7 @@ ControllerSpotify.prototype.getConfigurationFiles = function () {
 ControllerSpotify.prototype.onStop = function () {
     var self = this;
     var defer = libQ.defer();
-
+    self.stopSocketStateListener();
     defer.resolve();
     return defer.promise;
 };
@@ -91,8 +94,18 @@ ControllerSpotify.prototype.initializeWsConnection = function () {
         console.log('received: %s', data);
         self.parseEventState(JSON.parse(data));
     });
+
+    ws.on('open', function () {
+        self.initializeSpotifyControls();
+    });
 };
 
+ControllerSpotify.prototype.initializeSpotifyControls = function () {
+    var self = this;
+
+    self.resetSpotifyState();
+    self.startSocketStateListener();
+};
 
 ControllerSpotify.prototype.resetSpotifyState = function () {
     var self = this;
@@ -126,6 +139,9 @@ ControllerSpotify.prototype.parseEventState = function (event) {
             self.state.title = event.data.name;
             self.state.duration = self.parseDuration(event.data.duration);
             self.state.uri = event.data.uri;
+            self.state.artist = self.parseArtists(event.data.artist_names);
+            self.state.album = event.data.album_name;
+            self.state.albumart = event.data.album_cover_url;
             break;
         case 'playing':
             self.state.status = 'play';
@@ -136,6 +152,14 @@ ControllerSpotify.prototype.parseEventState = function (event) {
         case 'seek':
             self.state.seek = event.data.seek;
         break;
+        case 'volume':
+            try {
+                var spotifyLastVolume = parseInt(event.data.value*100);
+                self.commandRouter.volumiosetvolume(spotifyLastVolume);
+            } catch(e) {
+                self.logger.error('Failed to parse Spotify volume event: ' + e);
+            }
+            break;
         default:
             self.logger.error('Failed to decode event: ' + event.type);
             break;
@@ -172,6 +196,25 @@ ControllerSpotify.prototype.parseDuration = function (spotifyDuration) {
         return 0;
     }
 }
+
+ControllerSpotify.prototype.parseArtists = function (spotifyArtists) {
+    var self = this;
+
+    var artist = '';
+    if (spotifyArtists.length > 0) {
+        for (var i in spotifyArtists) {
+            if (!artist.length) {
+                artist = spotifyArtists[i];
+            } else {
+                artist = artist + ', ' + spotifyArtists[i];
+            }
+        }
+        return artist;
+    } else {
+        return spotifyArtists;
+    }
+}
+
 
 ControllerSpotify.prototype.spotConnUnsetVolatile = function () {
     var self = this;
@@ -266,6 +309,13 @@ ControllerSpotify.prototype.seek = function (position) {
     this.sendSpotifyLocalApiCommandWithPayload('/player/seek', { position: position });
 };
 
+ControllerSpotify.prototype.setSpotifyVolume = function (volumioVolume) {
+    this.logger.info('Spotify volume to: ' + volumioVolume);
+
+    this.currentSpotifyVolume = volumioVolume;
+    this.sendSpotifyLocalApiCommandWithPayload('/player/volume', { volume: volumioVolume / 100 });
+};
+
 ControllerSpotify.prototype.random = function (value) {
     this.logger.info('Spotify Random: ' + value);
 
@@ -275,4 +325,39 @@ ControllerSpotify.prototype.random = function (value) {
 
 ControllerSpotify.prototype.repeat = function (value, repeatSingle) {
     // to implement
+};
+
+ControllerSpotify.prototype.startSocketStateListener = function () {
+    var self = this;
+
+    if (self.stateSocket) {
+        self.stateSocket.off();
+        self.stateSocket.disconnect();
+    }
+
+    self.stateSocket= io.connect('http://localhost:3000');
+    self.stateSocket.on('connect', function() {
+        self.stateSocket.emit('getState', '');
+    });
+
+    self.stateSocket.on('pushState', function (data) {
+       if (data && data.volume && data.volume !== self.currentSpotifyVolume) {
+           var currentVolume = data.volume;
+           if (data.mute === true) {
+               currentVolume = 0;
+           }
+           // TODO FIX THIS, AS USUAL
+           //self.logger.info('Aligning Spotify Volume to: ' + currentVolume);
+           //self.setSpotifyVolume(currentVolume);
+       }
+    });
+};
+
+ControllerSpotify.prototype.stopSocketStateListener = function () {
+    var self = this;
+
+    if (self.stateSocket) {
+        self.stateSocket.off();
+        self.stateSocket.disconnect();
+    }
 };
