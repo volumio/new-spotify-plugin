@@ -122,7 +122,7 @@ ControllerSpotify.prototype.resetSpotifyState = function () {
         trackType: 'spotify',
         seek: 0,
         duration: 0,
-        samplerate: '',
+        samplerate: '44.1 KHz',
         bitdepth: '16 bit',
         bitrate: '',
         channels: 2
