@@ -150,7 +150,7 @@ ControllerSpotify.prototype.parseEventState = function (event) {
             self.state.status = 'pause';
             break;
         case 'seek':
-            self.state.seek = event.data.seek;
+            self.state.seek = event.data.position;
         break;
         case 'volume':
             try {
