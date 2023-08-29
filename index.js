@@ -238,7 +238,7 @@ ControllerSpotify.prototype.play = function () {
 ControllerSpotify.prototype.stop = function () {
     this.logger.info('Spotify Stop');
 
-    this.sendSpotifyLocalApiCommand('/status/pause');
+    this.sendSpotifyLocalApiCommand('/player/pause');
 };
 
 
@@ -251,19 +251,19 @@ ControllerSpotify.prototype.resume = function () {
 ControllerSpotify.prototype.next = function () {
     this.logger.info('Spotify next');
 
-    this.sendSpotifyLocalApiCommand('/status/next');
+    this.sendSpotifyLocalApiCommand('/player/next');
 };
 
 ControllerSpotify.prototype.previous = function () {
     this.logger.info('Spotify previous');
 
-    this.sendSpotifyLocalApiCommand('/status/prev');
+    this.sendSpotifyLocalApiCommand('/player/prev');
 };
 
 ControllerSpotify.prototype.seek = function (position) {
     this.logger.info('Spotify seek to: ' + position);
 
-    this.sendSpotifyLocalApiCommandWithPayload('/status/seek', { position: position });
+    this.sendSpotifyLocalApiCommandWithPayload('/player/seek', { position: position });
 };
 
 ControllerSpotify.prototype.random = function (value) {
