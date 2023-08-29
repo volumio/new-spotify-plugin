@@ -9,10 +9,13 @@ var websocket = require('ws');
 var path = require('path');
 var SpotifyWebApi = require('spotify-web-api-node');
 var io = require('socket.io-client');
+var exec = require('child_process').exec;
+var execSync = require('child_process').execSync;
 
 var spotifyLocalApiEndpointBase = 'http://127.0.0.1:9876';
 var stateSocket = undefined;
 var currentSpotifyVolume = undefined;
+var selectedBitrate;
 
 // Define the ControllerSpotify class
 module.exports = ControllerSpotify;
@@ -45,7 +48,7 @@ ControllerSpotify.prototype.getConfigurationFiles = function () {
 ControllerSpotify.prototype.onStop = function () {
     var self = this;
     var defer = libQ.defer();
-    self.stopSocketStateListener();
+    self.stopLibrespotDaemon();
     defer.resolve();
     return defer.promise;
 };
@@ -53,7 +56,7 @@ ControllerSpotify.prototype.onStop = function () {
 ControllerSpotify.prototype.onStart = function () {
     var self = this;
     var defer = libQ.defer();
-    self.initializeWsConnection();
+    self.initializeLibrespotDaemon();
     defer.resolve();
     return defer.promise;
 };
@@ -87,7 +90,11 @@ ControllerSpotify.prototype.initializeWsConnection = function () {
     // This is the websocket event listener for the Spotify service
     var ws = new websocket('ws://localhost:9876/events');
     ws.on('error', function(error){
-        console.error(error);
+        self.logger.info('Error connecting to go-librespot Websocket: ' + error);
+        setTimeout(()=>{
+            self.logger.info('Trying to reconnect to go-librespot Websocket');
+            self.initializeWsConnection();
+        }, 2000);
     });
 
     ws.on('message', function message(data) {
@@ -197,6 +204,12 @@ ControllerSpotify.prototype.parseDuration = function (spotifyDuration) {
     }
 }
 
+ControllerSpotify.prototype.getCurrentBitrate = function () {
+    var self = this;
+
+    return self.selectedBitrate + ' kbps';
+}
+
 ControllerSpotify.prototype.parseArtists = function (spotifyArtists) {
     var self = this;
 
@@ -234,6 +247,7 @@ ControllerSpotify.prototype.getState = function () {
 ControllerSpotify.prototype.pushState = function (state) {
     var self = this;
 
+    self.state.bitrate = self.getCurrentBitrate();
     return self.commandRouter.servicePushState(self.state, 'spop');
 };
 
@@ -362,11 +376,71 @@ ControllerSpotify.prototype.stopSocketStateListener = function () {
     }
 };
 
+
+// DAEMON MANAGEMENT
+
+ControllerSpotify.prototype.initializeLibrespotDaemon = function () {
+    var self = this;
+    var defer = libQ.defer();
+
+    this.selectedBitrate = self.config.get('bitrate_number', '320').toString();
+
+    self.createConfigFile()
+        .then(self.startLibrespotDaemon())
+        .then(self.initializeWsConnection())
+        .then(function () {
+            self.logger.info('go-librespot daemon successfully initialized');
+            defer.resolve();
+        })
+        .fail(function (e) {
+            defer.reject(e);
+            self.logger.error('Error initializing go-librespot daemon: ' + e);
+        });
+
+    return defer.promise;
+};
+
+ControllerSpotify.prototype.startLibrespotDaemon = function () {
+    var self = this;
+    var defer = libQ.defer();
+
+    exec("/usr/bin/sudo systemctl restart go-librespot-daemon.service", function (error, stdout, stderr) {
+        if (error) {
+            self.logger.error('Cannot start Go-librespot Daemon');
+            defer.reject(new Error(error));
+        } else {
+            setTimeout(()=>{
+                defer.resolve();
+            }, 2000)}
+    });
+
+    return defer.promise;
+
+};
+
+ControllerSpotify.prototype.stopLibrespotDaemon = function () {
+    var self = this;
+    var defer = libQ.defer();
+
+    exec("/usr/bin/sudo systemctl stop go-librespot-daemon.service", function (error, stdout, stderr) {
+        if (error) {
+            self.logger.error('Cannot stop Go-librespot Daemon');
+            defer.reject(new Error(error));
+        } else {
+            setTimeout(()=>{
+                defer.resolve();
+            }, 2000)}
+    });
+
+    return defer.promise;
+};
+
+
 ControllerSpotify.prototype.createConfigFile = function () {
     var self = this;
     var defer = libQ.defer();
 
-    logger.info('Creating Spotify config file');
+    this.logger.info('Creating Spotify config file');
 
     var configFileDestinationPath = '/home/volumio/new-spotify-plugin/librespot-go/go-librespot/config.yml';
 
@@ -377,14 +451,46 @@ ControllerSpotify.prototype.createConfigFile = function () {
     }
 
     var devicename = this.commandRouter.sharedVars.get('system.name');
+    var selectedBitrate = self.config.get('bitrate_number', '320').toString();
 
-    const conf = template.replace('${device_name}', devicename);
+    const conf = template.replace('${device_name}', devicename)
+        .replace('${bitrate_number}', selectedBitrate);
 
     fs.writeFile(configFileDestinationPath, conf, (err) => {
         if (err) {
+            defer.reject(err);
             this.logger.error('Failed to write spotify config file: ' + err);
         } else {
+            defer.resolve('');
             this.logger.info('Spotify config file written');
         }
     });
+    return defer.promise;
+};
+
+ControllerSpotify.prototype.saveGoLibrespotSettings = function (data, avoidBroadcastUiConfig) {
+    var self = this;
+    var defer = libQ.defer();
+
+    var broadcastUiConfig = true;
+    if (avoidBroadcastUiConfig === true){
+        broadcastUiConfig = false;
+    }
+
+    if (data.bitrate !== undefined && data.bitrate.value !== undefined) {
+        self.config.set('bitrate_number', data.bitrate.value);
+    }
+
+    if (data.debug !== undefined) {
+        self.config.set('debug', data.debug);
+    }
+    if (data.icon && data.icon.value !== undefined) {
+        self.config.set('icon', data.icon.value);
+    }
+
+
+    self.selectedBitrate = self.config.get('bitrate_number', '320').toString();
+    self.initializeLibrespotDaemon();
+
+    return defer.promise;
 };

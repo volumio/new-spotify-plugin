@@ -68,55 +68,17 @@
       "onSave": {
         "type": "controller",
         "endpoint": "music_service/spop",
-        "method": "saveVolspotconnectSettings"
+        "method": "saveGoLibrespotSettings"
       },
       "saveButton": {
         "label": "TRANSLATE.SAVE",
         "data": [
-          "shareddevice",
-          "initvol",
-          "normalvolume",
           "bitrate",
-          "volume_ctrl",
-          "gapless",
-          "autoplay",
           "debug",
           "icon"
         ]
       },
       "content": [
-        {
-          "id": "shareddevice",
-          "element": "switch",
-          "doc": "If enabled, the device is useable by any user on the network. If disable, a unique user uses it",
-          "label": "TRANSLATE.SHAREDDEVICE",
-          "value": true
-        },
-        {
-          "id": "initvol",
-          "element": "equalizer",
-          "label": "TRANSLATE.INITVOL",
-          "doc": "TRANSLATE.DESCINITVOL",
-          "hidden": true,
-          "config": {
-            "orientation": "horizontal",
-            "bars": [{
-              "min": "0",
-              "max": "100",
-              "step": "5",
-              "value": "30",
-              "tooltip": "always"
-            }]
-          }
-        },
-        {
-          "id": "normalvolume",
-          "element": "switch",
-          "doc": "TRANSLATE.DESCVOLNORM",
-          "label": "TRANSLATE.VOLNORM",
-          "value": false,
-          "hidden": true
-        },
         {
           "id": "bitrate",
           "element": "select",
@@ -139,48 +101,6 @@
               "label": "96 kbps"
             }
           ]
-        },
-        {
-          "id": "volume_ctrl",
-          "type": "text",
-          "element": "select",
-          "doc": "TRANSLATE.DESCPVOLUMECTRL",
-          "label": "TRANSLATE.VOLUMECTRL",
-          "hidden": true,
-          "value": {
-            "value": "fixed",
-            "label": "TRANSLATE.VOLUMECTRL_FIXED"
-          },
-
-          "options": [{
-            "value": "linear",
-            "label": "TRANSLATE.VOLUMECTRL_LINEAR"
-          },
-            {
-              "value": "log",
-              "label": "TRANSLATE.VOLUMECTRL_LOG"
-            },
-            {
-              "value": "fixed",
-              "label": "TRANSLATE.VOLUMECTRL_FIXED"
-            }
-          ]
-        },
-        {
-          "id": "gapless",
-          "element": "switch",
-          "doc": "TRANSLATE.DESCGAPLESS",
-          "label": "TRANSLATE.GAPLESS",
-          "value": true,
-          "hidden": true
-        },
-        {
-          "id": "autoplay",
-          "element": "switch",
-          "doc": "TRANSLATE.DESCAUTOPLAY",
-          "label": "TRANSLATE.AUTOPLAY",
-          "value": true,
-          "hidden": true
         },
         {
           "id": "debug",
