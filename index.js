@@ -11,6 +11,7 @@ var SpotifyWebApi = require('spotify-web-api-node');
 var io = require('socket.io-client');
 var exec = require('child_process').exec;
 var execSync = require('child_process').execSync;
+var NodeCache = require('node-cache');
 
 var spotifyLocalApiEndpointBase = 'http://127.0.0.1:9876';
 var stateSocket = undefined;
@@ -57,6 +58,7 @@ ControllerSpotify.prototype.onStart = function () {
     var self = this;
     var defer = libQ.defer();
     self.initializeLibrespotDaemon();
+    self.initializeSpotifyBrowsingFacility();
     defer.resolve();
     return defer.promise;
 };
@@ -494,3 +496,450 @@ ControllerSpotify.prototype.saveGoLibrespotSettings = function (data, avoidBroad
 
     return defer.promise;
 };
+
+// OAUTH
+
+ControllerSpotify.prototype.refreshAccessToken = function () {
+    var self = this;
+    var defer = libQ.defer();
+
+    var refreshToken = self.config.get('refresh_token', 'none');
+    if (refreshToken !== 'none' && refreshToken !== null && refreshToken !== undefined) {
+        superagent.post('https://oauth-performer.dfs.volumio.org/spotify/accessToken')
+            .send({refreshToken: refreshToken})
+            .then(function (results) {
+                if (results && results.body && results.body.accessToken) {
+                    defer.resolve(results)
+                } else {
+                    defer.resject('No access token received');
+                }
+            })
+            .catch(function (err) {
+                self.logger.info('An error occurred while refreshing Spotify Token ' + err);
+            });
+    }
+
+    return defer.promise;
+};
+
+ControllerSpotify.prototype.spotifyClientCredentialsGrant = function () {
+    var self = this;
+    var defer = libQ.defer();
+    var d = new Date();
+    var now = d.getTime();
+
+    var refreshToken = self.config.get('refresh_token', 'none');
+    if (refreshToken !== 'none' && refreshToken !== null && refreshToken !== undefined) {
+        self.spotifyApi.setRefreshToken(refreshToken);
+        self.refreshAccessToken()
+            .then(function (data) {
+                self.spotifyAccessToken = data.body['accessToken'];
+                console.log('------------------------------------------------------ ACCESS TOKEN ------------------------------------------------------');
+                console.log(self.spotifyAccessToken);
+                console.log('------------------------------------------------------ ACCESS TOKEN ------------------------------------------------------');
+                self.spotifyApi.setAccessToken(self.spotifyAccessToken);
+                self.spotifyAccessTokenExpiration = data.body['expiresInSeconds'] * 1000 + now;
+                self.logger.info('New Spotify access token = ' + self.spotifyAccessToken);
+                defer.resolve();
+            }, function (err) {
+                self.logger.info('Spotify credentials grant failed with ' + err);
+            });
+    }
+
+    return defer.promise;
+}
+
+ControllerSpotify.prototype.oauthLogin = function (data) {
+    var self=this;
+    console.log(JSON.stringify(data));
+    if (data && data.refresh_token) {
+        self.logger.info('Saving Spotify Refresh Token');
+        self.config.set('refresh_token', data.refresh_token);
+        self.initializeSpotifyBrowsingFacility();
+
+        var config = self.getUIConfig();
+        config.then(function(conf) {
+            self.commandRouter.broadcastMessage('pushUiConfig', conf);
+            self.commandRouter.broadcastMessage('closeAllModals', '');
+            defer.resolve(conf)
+        });
+
+    } else {
+        self.logger.error('Could not receive oauth data');
+    }
+};
+
+ControllerSpotify.prototype.externalOauthLogin = function (data) {
+    var self=this;
+    var defer = libQ.defer();
+
+    if (data && data.refresh_token) {
+        self.logger.info('Saving Spotify Refresh Token');
+        self.config.set('refresh_token', data.refresh_token);
+        self.spopDaemonConnect();
+        self.commandRouter.pushToastMessage('success', self.getI18n('SPOTIFY_LOGIN'), self.getI18n('SUCCESSFULLY_AUTHORIZED'));
+        setTimeout(()=>{
+            defer.resolve('');
+        },150);
+    } else {
+        self.logger.error('Could not receive oauth data');
+        defer.resolve('');
+    }
+    return defer.promise
+};
+
+ControllerSpotify.prototype.spotifyApiConnect = function () {
+    var self = this;
+    var defer = libQ.defer();
+    var d = new Date();
+
+    self.spotifyApi = new SpotifyWebApi();
+
+    // Retrieve an access token
+    self.spotifyClientCredentialsGrant()
+        .then(function (data) {
+                self.logger.info('Spotify credentials grant success - running version from March 24, 2019');
+                defer.resolve();
+            }, function (err) {
+                self.logger.info('Spotify credentials grant failed with ' + err);
+            }
+        );
+
+    return defer.promise;
+}
+
+ControllerSpotify.prototype.spotifyClientCredentialsGrant = function () {
+    var self = this;
+    var defer = libQ.defer();
+    var d = new Date();
+    var now = d.getTime();
+
+    var refreshToken = self.config.get('refresh_token', 'none');
+    if (refreshToken !== 'none' && refreshToken !== null && refreshToken !== undefined) {
+        self.spotifyApi.setRefreshToken(refreshToken);
+        self.refreshAccessToken()
+            .then(function (data) {
+                self.spotifyAccessToken = data.body['accessToken'];
+                self.spotifyApi.setAccessToken(self.spotifyAccessToken);
+                self.spotifyAccessTokenExpiration = data.body['expiresInSeconds'] * 1000 + now;
+                self.logger.info('New Spotify access token = ' + self.spotifyAccessToken);
+                defer.resolve();
+            }, function (err) {
+                self.logger.info('Spotify credentials grant failed with ' + err);
+            });
+    }
+
+    return defer.promise;
+}
+
+ControllerSpotify.prototype.refreshAccessToken = function () {
+    var self = this;
+    var defer = libQ.defer();
+
+    var refreshToken = self.config.get('refresh_token', 'none');
+    if (refreshToken !== 'none' && refreshToken !== null && refreshToken !== undefined) {
+        superagent.post('https://oauth-performer.dfs.volumio.org/spotify/accessToken')
+            .send({refreshToken: refreshToken})
+            .then(function (results) {
+                if (results && results.body && results.body.accessToken) {
+                    defer.resolve(results)
+                } else {
+                    defer.resject('No access token received');
+                }
+            })
+            .catch(function (err) {
+                self.logger.info('An error occurred while refreshing Spotify Token ' + err);
+            });
+    }
+
+    return defer.promise;
+};
+
+ControllerSpotify.prototype.spotifyCheckAccessToken = function () {
+    var self = this;
+    var defer = libQ.defer();
+    var d = new Date();
+    var now = d.getTime();
+
+    if (self.spotifyAccessTokenExpiration < now) {
+        self.refreshAccessToken()
+            .then(function (data) {
+                self.spotifyAccessToken = data.body.accessToken;
+                self.spotifyApi.setAccessToken(data.body.accessToken);
+                self.spotifyAccessTokenExpiration = data.body.expiresInSeconds * 1000 + now;
+                self.logger.info('New access token = ' + self.spotifyAccessToken);
+                defer.resolve();
+            });
+    } else {
+        defer.resolve();
+    }
+
+    return defer.promise;
+
+};
+
+ControllerSpotify.prototype.initializeSpotifyBrowsingFacility = function () {
+    var self = this;
+
+    var refreshToken = self.config.get('refresh_token', 'none');
+    if (refreshToken !== 'none' && refreshToken !== null && refreshToken !== undefined) {
+        self.spotifyApiConnect()
+            .then(()=>{
+                self.logger.info('Spotify Successfully logged in');
+                self.isLoggedIn = true;
+                self.getRoot();
+                self.addToBrowseSources();
+            })
+    }
+}
+
+// BROWSING
+ControllerSpotify.prototype.handleBrowseUri = function (curUri) {
+    var self = this;
+
+    self.commandRouter.logger.info('In handleBrowseUri, curUri=' + curUri);
+    var response;
+
+    if (curUri.startsWith('spotify')) {
+        if (curUri == 'spotify') {
+            response = self.getRoot();
+        } else if (curUri.startsWith('spotify/playlists')) {
+            if (curUri == 'spotify/playlists')
+                response = self.getMyPlaylists(curUri); // use the Spotify Web API instead of the spop service
+            else {
+                response = self.listWebPlaylist(curUri); // use the function to list playlists returned from the Spotify Web API
+            }
+        } else if (curUri.startsWith('spotify/myalbums')) {
+            response = self.getMyAlbums(curUri);
+        } else if (curUri.startsWith('spotify/mytracks')) {
+            response = self.getMyTracks(curUri);
+        } else if (curUri.startsWith('spotify/mytopartists')) {
+            response = self.getTopArtists(curUri);
+        } else if (curUri.startsWith('spotify/mytoptracks')) {
+            response = self.getTopTracks(curUri);
+        } else if (curUri.startsWith('spotify/myrecentlyplayedtracks')) {
+            response = self.getRecentTracks(curUri);
+        } else if (curUri.startsWith('spotify/featuredplaylists')) {
+            response = self.featuredPlaylists(curUri);
+        } else if (curUri.startsWith('spotify:user:')) {
+            response = self.listWebPlaylist(curUri);
+        } else if (curUri.startsWith('spotify:playlist:')) {
+            var uriSplitted = curUri.split(':');
+            response = self.listWebPlaylist('spotify:user:spotify:playlist:' + uriSplitted[2]);
+        } else if (curUri.startsWith('spotify/new')) {
+            response = self.listWebNew(curUri);
+        } else if (curUri.startsWith('spotify/categories')) {
+            response = self.listWebCategories(curUri);
+        } else if (curUri.startsWith('spotify:album')) {
+            response = self.listWebAlbum(curUri);
+        } else if (curUri.startsWith('spotify/category')) {
+            response = self.listWebCategory(curUri);
+        } else if (curUri.startsWith('spotify:artist:')) {
+            response = self.listWebArtist(curUri);
+        }
+        else {
+            self.logger.info('************* Bad browse Uri:' + curUri);
+        }
+    }
+
+    return response;
+};
+
+ControllerSpotify.prototype.getRoot = function () {
+    var self = this;
+    var defer = libQ.defer();
+
+    self.browseCache.get('root',function( err, value ){
+        if( !err ){
+            // Root has not been cached yet
+            if(value == undefined){
+                self.listRoot().then((data)=>{
+                    // Set root cache
+                    self.browseCache.set('root',data)
+                    defer.resolve(data)
+                });
+            } else {
+                // Cached Root
+                defer.resolve(value)
+            }
+        } else {
+            self.logger.error('Could not fetch root spotify folder cached data: ' + err);
+        }
+    });
+
+    return defer.promise
+};
+
+ControllerSpotify.prototype.listRoot = function (curUri) {
+    var self = this;
+    var defer = libQ.defer();
+
+    var response = {
+        navigation: {
+            lists: [
+                {
+                    "availableListViews": [
+                        "grid","list"
+                    ],
+                    "type": "title",
+                    "title": self.getI18n('MY_MUSIC'),
+                    "items": [
+                        {
+                            service: 'spop',
+                            type: 'streaming-category',
+                            title: self.getI18n('MY_PLAYLISTS'),
+                            artist: '',
+                            album: '',
+                            albumart: '/albumart?sourceicon=music_service/spop/icons/playlist.png',
+                            uri: 'spotify/playlists'
+                        },
+                        {
+                            service: 'spop',
+                            type: 'streaming-category',
+                            title: self.getI18n('MY_ALBUMS'),
+                            artist: '',
+                            album: '',
+                            albumart: '/albumart?sourceicon=music_service/spop/icons/album.png',
+                            uri: 'spotify/myalbums'
+                        },
+                        {
+                            service: 'spop',
+                            type: 'streaming-category',
+                            title: self.getI18n('MY_TRACKS'),
+                            artist: '',
+                            album: '',
+                            albumart: '/albumart?sourceicon=music_service/spop/icons/track.png',
+                            uri: 'spotify/mytracks'
+                        },
+                        {
+                            service: 'spop',
+                            type: 'streaming-category',
+                            title: self.getI18n('MY_TOP_ARTISTS'),
+                            artist: '',
+                            album: '',
+                            albumart: '/albumart?sourceicon=music_service/spop/icons/artist.png',
+                            uri: 'spotify/mytopartists'
+                        },
+                        {
+                            service: 'spop',
+                            type: 'streaming-category',
+                            title: self.getI18n('MY_TOP_TRACKS'),
+                            artist: '',
+                            album: '',
+                            albumart: '/albumart?sourceicon=music_service/spop/icons/track.png',
+                            uri: 'spotify/mytoptracks'
+                        },
+                        {
+                            service: 'spop',
+                            type: 'streaming-category',
+                            title: self.getI18n('MY_RECENTLY_PLAYED_TRACKS'),
+                            artist: '',
+                            album: '',
+                            albumart: '/albumart?sourceicon=music_service/spop/icons/track.png',
+                            uri: 'spotify/myrecentlyplayedtracks'
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+
+    var spotifyRootArray = [self.featuredPlaylists('spotify/featuredplaylists'),self.listWebNew('spotify/new'),self.listWebCategories('spotify/categories')];
+    libQ.all(spotifyRootArray)
+        .then(function (results) {
+
+            var discoveryArray = [
+                {
+                    "availableListViews": [
+                        "grid","list"
+                    ],
+                    "type": "title",
+                    "title": self.getI18n('FEATURED_PLAYLISTS'),
+                    "items": results[0].navigation.lists[0].items
+                },
+                {
+                    "availableListViews": [
+                        "grid","list"
+                    ],
+                    "type": "title",
+                    "title": self.getI18n('WHATS_NEW'),
+                    "items": results[1].navigation.lists[0].items
+                },
+                {
+                    "availableListViews": [
+                        "grid","list"
+                    ],
+                    "type": "title",
+                    "title": self.getI18n('GENRES_AND_MOODS'),
+                    "items": results[2].navigation.lists[0].items
+                }
+            ];
+            response.navigation.lists = response.navigation.lists.concat(discoveryArray);
+            defer.resolve(response);
+        })
+        .fail(function (err) {
+            self.logger.info('An error occurred while getting Spotify ROOT Discover Folders: ' + err);
+            defer.resolve(response);
+        });
+
+    return defer.promise;
+}
+
+
+// New function that uses the Spotify Web API to get a user's playlists.  Must be authenticated ahead of time and using an access token that asked for the proper scopes
+ControllerSpotify.prototype.getMyPlaylists = function (curUri) {
+
+    var self = this;
+
+    var defer = libQ.defer();
+
+    self.spotifyCheckAccessToken()
+        .then(function (data) {
+
+
+                var response = {
+                    navigation: {
+                        prev: {
+                            uri: 'spotify'
+                        },
+                        "lists": [
+                            {
+                                "availableListViews": [
+                                    "list",
+                                    "grid"
+                                ],
+                                "items": []
+                            }
+                        ]
+                    }
+                };
+
+                superagent.get('https://api.spotify.com/v1/me/playlists')
+                    .set("Content-Type", "application/json")
+                    .set("Authorization", "Bearer " + self.spotifyAccessToken)
+                    .query({limit: 50})
+                    .accept('application/json')
+                    .then(function (results) {
+                        //  self.logger.info('Playlist result is: ' + JSON.stringify(results.body));
+                        for (var i in results.body.items) {
+                            var playlist = results.body.items[i];
+                            response.navigation.lists[0].items.push({
+                                service: 'spop',
+                                type: 'playlist',
+                                title: playlist.name,
+                                albumart: self._getAlbumArt(playlist),
+                                uri: 'spotify:user:spotify:playlist:' + playlist.id
+                            });
+                        }
+
+                        defer.resolve(response);
+                    })
+                    .catch(function (err) {
+                        self.logger.info('An error occurred while listing Spotify getMyPlaylists ' + err.message);
+                    });
+            }
+        );
+
+    return defer.promise;
+};
+
