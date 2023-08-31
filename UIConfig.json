@@ -13,7 +13,15 @@
         "id": "spotify_use",
         "description": "TRANSLATE.OPEN_OR_INSTALL_SPOTIFY_DESCRIPTION",
         "onClick": {"type":"openUrl", "url":"spotify://"}
-      },
+      }
+    ]
+  },
+    {
+    "id": "section_account",
+    "element": "section",
+    "label": "TRANSLATE.SPOTIFY_BROWSING",
+    "hidden": false,
+    "content": [
       {
         "id":"oauth",
         "element": "button",
@@ -33,44 +41,6 @@
           "app-remote-control",
           "streaming"
         ]}
-      }
-    ]
-  },
-    {
-    "id": "section_account",
-    "element": "section",
-    "label": "TRANSLATE.SPOTIFY_BROWSING",
-    "onSave": {
-      "type": "controller",
-      "endpoint": "music_service/spop",
-      "method": "saveVolspotconnectAccount"
-    },
-    "content": [
-      {
-        "id": "username",
-        "type": "text",
-        "element": "input",
-        "description": "TRANSLATE.LOGIN_TO_ENABLE_BROWSING",
-        "label": "TRANSLATE.USERNAME",
-        "value": "",
-        "options": []
-      },
-      {
-        "id": "password",
-        "type": "password",
-        "element": "input",
-        "doc": "TRANSLATE.TIPSPOTPASSWD",
-        "label": "TRANSLATE.PASSWORD",
-        "value": "",
-        "options": []
-      },
-      {
-        "id":"placeholder",
-        "element": "button",
-        "label": "TRANSLATE.LOGOUT",
-        "description": "TRANSLATE.LOGOUT",
-        "onClick": {"type":"emit", "message":"callMethod", "data":{"endpoint":"music_service/spop","method":"logout","data":""}},
-        "hidden": true
       },
       {
         "id":"logout",

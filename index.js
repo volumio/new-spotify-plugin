@@ -18,10 +18,17 @@ var configFileDestinationPath = '/tmp/go-librespot-config.yml';
 var credentialsPath = '/data/configuration/music_service/spop/spotifycredentials.json';
 var spotifyLocalApiEndpointBase = 'http://127.0.0.1:9876';
 var stateSocket = undefined;
-var currentSpotifyVolume = undefined;
+
 var selectedBitrate;
 var loggedInUsername;
 var userCountry;
+
+// State management
+var currentVolumioState;
+var currentSpotifyVolume;
+var currentVolumioVolume;
+var isInVolatileMode = false;
+
 
 // Debug
 var isDebugMode = false;
@@ -37,7 +44,6 @@ function ControllerSpotify(context) {
     this.commandRouter = this.context.coreCommand;
     this.logger = this.context.logger;
     this.configManager = this.context.configManager;
-    this.isSpotifyPlayingInVolatileMode = false;
     this.resetSpotifyState();
 }
 
@@ -86,6 +92,11 @@ ControllerSpotify.prototype.getUIConfig = function () {
         __dirname + '/i18n/strings_en.json',
         __dirname + '/UIConfig.json')
         .then(function (uiconf) {
+            var credentials_type = self.config.get('credentials_type', 'zeroconf');
+            if (self.loggedInUsername !== undefined && credentials_type === 'spotify_token') {
+                uiconf.sections[1].content[0].hidden = true;
+                uiconf.sections[1].content[1].hidden = false;
+            }
             defer.resolve(uiconf);
         })
         .fail(function (error) {
@@ -153,6 +164,8 @@ ControllerSpotify.prototype.resetSpotifyState = function () {
 ControllerSpotify.prototype.parseEventState = function (event) {
     var self = this;
 
+    var pushStateforEvent = false;
+
     // create a switch case which handles types of events
     // and updates the state accordingly
     switch (event.type) {
@@ -163,16 +176,25 @@ ControllerSpotify.prototype.parseEventState = function (event) {
             self.state.artist = self.parseArtists(event.data.artist_names);
             self.state.album = event.data.album_name;
             self.state.albumart = event.data.album_cover_url;
+            pushStateforEvent = false;
             break;
         case 'playing':
             self.state.status = 'play';
+            self.identifyPlaybackMode(event.data);
+            pushStateforEvent = true;
             break;
         case 'paused':
             self.state.status = 'pause';
+            self.identifyPlaybackMode(event.data);
+            pushStateforEvent = true;
             break;
         case 'seek':
             self.state.seek = event.data.position;
+            pushStateforEvent = true;
         break;
+        case 'active':
+            //self.state.status = 'play';
+            pushStateforEvent = false;
         case 'volume':
             try {
                 var spotifyLastVolume = parseInt(event.data.value*100);
@@ -180,32 +202,75 @@ ControllerSpotify.prototype.parseEventState = function (event) {
             } catch(e) {
                 self.logger.error('Failed to parse Spotify volume event: ' + e);
             }
+            pushStateforEvent = false;
             break;
         default:
             self.logger.error('Failed to decode event: ' + event.type);
+            pushStateforEvent = false;
             break;
     }
 
-    if (self.isSpotifyPlayingInVolatileMode) {
+    if (pushStateforEvent) {
+        self.pushState(self.state);
+    }
+
+    /*
+    if (event && event.data && event.data.play_origin && event.data.play_origin === 'go-librespot') {
+        self.isSpotifyPlayingInVolatileMode = false;
         self.pushState(self.state);
     } else {
+        if (self.isSpotifyPlayingInVolatileMode) {
+            self.pushState(self.state);
+        } else {
+            self.initializeSpotifyPlaybackInVolatileMode();
+        }
+    }
+
+     */
+};
+
+ControllerSpotify.prototype.identifyPlaybackMode = function (data) {
+    var self = this;
+
+    // This functions checks if Spotify is playing in volatile mode or in Volumio mode (playback started from Volumio UI)
+    // play_origin = 'go-librespot' means that Spotify is playing in Volumio mode
+    // play_origin = 'your_library' means that Spotify is playing in volatile mode
+    if (data && data.play_origin && data.play_origin === 'go-librespot') {
+        isInVolatileMode = false;
+    }
+
+    if (data && data.play_origin && data.play_origin === 'your_library') {
+        isInVolatileMode = true;
+    }
+
+    if (isInVolatileMode && currentVolumioState.service !== 'spop') {
         self.initializeSpotifyPlaybackInVolatileMode();
     }
+
 };
 
 ControllerSpotify.prototype.initializeSpotifyPlaybackInVolatileMode = function () {
     var self = this;
 
-    self.context.coreCommand.stateMachine.setConsumeUpdateService(undefined);
-    self.context.coreCommand.stateMachine.setVolatile({
-        service: 'spop',
-        callback: self.spotConnUnsetVolatile()
-    });
+    self.logger.info('Spotify is playing in volatile mode');
 
-    setTimeout(()=>{
-        self.isSpotifyPlayingInVolatileMode = true;
-        self.pushState(self.state);
-    }, 100)
+    try {
+        self.commandRouter.stateMachine.unSetVolatile();
+        self.commandRouter.volumioStop().then(()=>{
+            self.commandRouter.stateMachine.setConsumeUpdateService(undefined);
+            self.context.coreCommand.stateMachine.setVolatile({
+                service: 'spop',
+                callback: self.spotConnUnsetVolatile()
+            });
+        })
+    } catch(e) {
+        self.commandRouter.stateMachine.unSetVolatile();
+        self.commandRouter.stateMachine.setConsumeUpdateService(undefined);
+        self.context.coreCommand.stateMachine.setVolatile({
+            service: 'spop',
+            callback: self.spotConnUnsetVolatile()
+        });
+    }
 };
 
 ControllerSpotify.prototype.parseDuration = function (spotifyDuration) {
@@ -355,6 +420,14 @@ ControllerSpotify.prototype.repeat = function (value, repeatSingle) {
     // to implement
 };
 
+ControllerSpotify.prototype.clearAddPlayTrack = function (track) {
+    var self = this;
+    self.commandRouter.pushConsoleMessage('[' + Date.now() + '] ' + 'ControllerSpotify::clearAddPlayTrack');
+
+    return self.sendSpotifyLocalApiCommandWithPayload('/player/play', { uri: track.uri });
+};
+
+
 ControllerSpotify.prototype.startSocketStateListener = function () {
     var self = this;
 
@@ -369,6 +442,7 @@ ControllerSpotify.prototype.startSocketStateListener = function () {
     });
 
     self.stateSocket.on('pushState', function (data) {
+       currentVolumioState = data;
        if (data && data.volume && data.volume !== self.currentSpotifyVolume) {
            var currentVolume = data.volume;
            if (data.mute === true) {
@@ -473,19 +547,18 @@ ControllerSpotify.prototype.createConfigFile = function () {
         .replace('${device_type}', icon);
 
     var credentials_type = self.config.get('credentials_type', 'zeroconf');
+    var logged_username = self.config.get('logged_username', '');
+    var access_token = self.config.get('access_token', '');
 
-    if (credentials_type === 'zeroconf') {
-        conf += 'credentials: ' + os.EOL;
-        conf += '  type: zeroconf' + os.EOL;
-    } else if (credentials_type === 'spotify_token') {
+    if (credentials_type === 'spotify_token' && logged_username !== '' && access_token !== '') {
         conf += 'credentials: ' + os.EOL;
         conf += '  type: spotify_token' + os.EOL;
-    }
-
-    if (!self.isOauthLoginAlreadyConfiguredOnDaemon() && self.loggedInUsername && self.spotifyAccessToken) {
         conf += '  spotify_token:' + os.EOL;
-        conf += '    username: "' + self.loggedInUsername + '"' + os.EOL;
-        conf += '    access_token: "' + self.spotifyAccessToken + '"';
+        conf += '    username: "' + logged_username + '"' + os.EOL;
+        conf += '    access_token: "' + access_token + '"';
+    } else {
+        conf += 'credentials: ' + os.EOL;
+        conf += '  type: zeroconf' + os.EOL;
     }
 
     fs.writeFile(configFileDestinationPath, conf, (err) => {
@@ -583,6 +656,7 @@ ControllerSpotify.prototype.spotifyClientCredentialsGrant = function () {
                 console.log('------------------------------------------------------ ACCESS TOKEN ------------------------------------------------------');
                 console.log(self.spotifyAccessToken);
                 console.log('------------------------------------------------------ ACCESS TOKEN ------------------------------------------------------');
+                self.config.set('access_token', self.spotifyAccessToken);
                 self.spotifyApi.setAccessToken(self.spotifyAccessToken);
                 self.spotifyAccessTokenExpiration = data.body['expiresInSeconds'] * 1000 + now;
                 self.logger.info('New Spotify access token = ' + self.spotifyAccessToken);
@@ -636,6 +710,68 @@ ControllerSpotify.prototype.externalOauthLogin = function (data) {
         defer.resolve('');
     }
     return defer.promise
+};
+
+ControllerSpotify.prototype.logout = function (avoidBroadcastUiConfig) {
+    var self=this;
+
+    var broadcastUiConfig = true;
+    if (avoidBroadcastUiConfig === true){
+        broadcastUiConfig = false;
+    }
+
+    self.deleteCredentialsFile();
+    self.resetSpotifyCredentials();
+    setTimeout(()=>{
+        self.initializeLibrespotDaemon();
+    }, 1000);
+
+
+    self.commandRouter.pushToastMessage('success', self.getI18n('LOGOUT'), self.getI18n('LOGOUT_SUCCESSFUL'));
+
+    self.pushUiConfig(broadcastUiConfig);
+    self.removeToBrowseSources();
+};
+
+ControllerSpotify.prototype.pushUiConfig = function (broadcastUiConfig) {
+    var self=this;
+
+    setTimeout(()=>{
+        var config = self.getUIConfig();
+        config.then((conf)=> {
+            if (broadcastUiConfig) {
+                self.commandRouter.broadcastMessage('pushUiConfig', conf);
+            }
+        });
+    }, 3000);
+};
+
+ControllerSpotify.prototype.resetSpotifyCredentials = function () {
+    var self=this;
+
+    self.config.set('logged_username', '');
+    self.config.set('access_token', '');
+    self.config.set('refresh_token', '');
+    self.config.set('credentials_type', 'zeroconf');
+
+    if (self.spotifyApi) {
+        self.spotifyApi.resetCredentials();
+    }
+
+    self.accessToken = undefined;
+    self.spotifyAccessTokenExpiration = undefined;
+    self.loggedInUsername = undefined;
+};
+
+ControllerSpotify.prototype.deleteCredentialsFile = function () {
+    var self=this;
+
+    self.logger.info('Deleting Spotify credentials File');
+    try {
+        fs.unlinkSync(credentialsPath)
+    } catch(err) {
+        self.logger.error('Failed to delete credentials file ' + e);
+    }
 };
 
 ControllerSpotify.prototype.spotifyApiConnect = function () {
@@ -736,6 +872,7 @@ ControllerSpotify.prototype.getUserInformations = function () {
                 console.log(JSON.stringify(data.body))
                 self.loggedInUsername = data.body.display_name || data.body.id;
                 self.userCountry = data.body.country || 'US';
+                self.config.set('logged_username', self.loggedInUsername);
                 self.isLoggedIn = true;
                 defer.resolve('');
             }
