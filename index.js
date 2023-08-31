@@ -12,11 +12,16 @@ var io = require('socket.io-client');
 var exec = require('child_process').exec;
 var execSync = require('child_process').execSync;
 var NodeCache = require('node-cache');
+var os = require('os');
 
+var configFileDestinationPath = '/tmp/go-librespot-config.yml';
+var credentialsPath = '/data/configuration/music_service/spop/spotifycredentials.json';
 var spotifyLocalApiEndpointBase = 'http://127.0.0.1:9876';
 var stateSocket = undefined;
 var currentSpotifyVolume = undefined;
 var selectedBitrate;
+var loggedInUsername;
+var userCountry;
 
 // Debug
 var isDebugMode = false;
@@ -397,7 +402,7 @@ ControllerSpotify.prototype.initializeLibrespotDaemon = function () {
     self.createConfigFile()
         .then(self.startLibrespotDaemon())
         .then(self.initializeWsConnection())
-        .then(function () {
+        .then(()=> {
             self.logger.info('go-librespot daemon successfully initialized');
             defer.resolve();
         })
@@ -415,12 +420,13 @@ ControllerSpotify.prototype.startLibrespotDaemon = function () {
 
     exec("/usr/bin/sudo systemctl restart go-librespot-daemon.service", function (error, stdout, stderr) {
         if (error) {
-            self.logger.error('Cannot start Go-librespot Daemon');
-            defer.reject(new Error(error));
+            self.logger.error('Cannot start Go-librespot Daemon: ' + error);
+            defer.reject(error);
         } else {
             setTimeout(()=>{
                 defer.resolve();
-            }, 2000)}
+            }, 3000);
+        }
     });
 
     return defer.promise;
@@ -433,12 +439,13 @@ ControllerSpotify.prototype.stopLibrespotDaemon = function () {
 
     exec("/usr/bin/sudo systemctl stop go-librespot-daemon.service", function (error, stdout, stderr) {
         if (error) {
-            self.logger.error('Cannot stop Go-librespot Daemon');
-            defer.reject(new Error(error));
+            self.logger.error('Cannot stop Go-librespot Daemon: ' + error);
+            defer.reject(error);
         } else {
-            setTimeout(()=>{
+            setTimeout(() => {
                 defer.resolve();
-            }, 2000)}
+            }, 2000);
+        }
     });
 
     return defer.promise;
@@ -451,8 +458,6 @@ ControllerSpotify.prototype.createConfigFile = function () {
 
     this.logger.info('Creating Spotify config file');
 
-    var configFileDestinationPath = '/home/volumio/new-spotify-plugin/librespot-go/go-librespot/config.yml';
-
     try {
         var template = fs.readFileSync(path.join(__dirname, 'config.yml.tmpl'), {encoding: 'utf8'});
     } catch (e) {
@@ -461,11 +466,27 @@ ControllerSpotify.prototype.createConfigFile = function () {
 
     var devicename = this.commandRouter.sharedVars.get('system.name');
     var selectedBitrate = self.config.get('bitrate_number', '320').toString();
-    var icon = self.config.get('icon', 'avr')
+    var icon = self.config.get('icon', 'avr');
 
-    const conf = template.replace('${device_name}', devicename)
+    var conf = template.replace('${device_name}', devicename)
         .replace('${bitrate_number}', selectedBitrate)
         .replace('${device_type}', icon);
+
+    var credentials_type = self.config.get('credentials_type', 'zeroconf');
+
+    if (credentials_type === 'zeroconf') {
+        conf += 'credentials: ' + os.EOL;
+        conf += '  type: zeroconf' + os.EOL;
+    } else if (credentials_type === 'spotify_token') {
+        conf += 'credentials: ' + os.EOL;
+        conf += '  type: spotify_token' + os.EOL;
+    }
+
+    if (!self.isOauthLoginAlreadyConfiguredOnDaemon() && self.loggedInUsername && self.spotifyAccessToken) {
+        conf += '  spotify_token:' + os.EOL;
+        conf += '    username: "' + self.loggedInUsername + '"' + os.EOL;
+        conf += '    access_token: "' + self.spotifyAccessToken + '"';
+    }
 
     fs.writeFile(configFileDestinationPath, conf, (err) => {
         if (err) {
@@ -477,6 +498,22 @@ ControllerSpotify.prototype.createConfigFile = function () {
         }
     });
     return defer.promise;
+};
+
+ControllerSpotify.prototype.isOauthLoginAlreadyConfiguredOnDaemon = function () {
+    var self = this;
+    console.log(credentialsPath)
+    try {
+        var credentialsFile = fs.readFileSync(credentialsPath, {encoding: 'utf8'}).toString();
+    } catch (e) {
+        self.logger.error('Failed to read credentials file: ' + e);
+    }
+
+    if (credentialsFile && credentialsFile.length > 0) {
+        return true;
+    } else {
+        return false;
+    }
 };
 
 ControllerSpotify.prototype.saveGoLibrespotSettings = function (data, avoidBroadcastUiConfig) {
@@ -564,15 +601,20 @@ ControllerSpotify.prototype.oauthLogin = function (data) {
     if (data && data.refresh_token) {
         self.logger.info('Saving Spotify Refresh Token');
         self.config.set('refresh_token', data.refresh_token);
-        self.initializeSpotifyBrowsingFacility();
 
-        var config = self.getUIConfig();
-        config.then(function(conf) {
-            self.commandRouter.broadcastMessage('pushUiConfig', conf);
-            self.commandRouter.broadcastMessage('closeAllModals', '');
-            defer.resolve(conf)
+        self.spotifyApiConnect().then(function () {
+            self.config.set('credentials_type', 'spotify_token');
+            self.initializeLibrespotDaemon();
+            self.initializeSpotifyBrowsingFacility();
+            var config = self.getUIConfig();
+            config.then(function(conf) {
+                self.commandRouter.broadcastMessage('pushUiConfig', conf);
+                self.commandRouter.broadcastMessage('closeAllModals', '');
+                defer.resolve(conf)
+            });
+        }).fail(function (e) {
+            self.logger.error('Failed to perform Spotify API connection after OAUTH Login: ' + e);
         });
-
     } else {
         self.logger.error('Could not receive oauth data');
     }
@@ -607,7 +649,12 @@ ControllerSpotify.prototype.spotifyApiConnect = function () {
     self.spotifyClientCredentialsGrant()
         .then(function (data) {
                 self.logger.info('Spotify credentials grant success - running version from March 24, 2019');
-                defer.resolve();
+                self.getUserInformations().then(function (data) {
+                    defer.resolve();
+                }).fail(function (err) {
+                    defer.reject(err);
+                    self.logger.error('Spotify credentials failed to read user data: ' + err);
+                });
             }, function (err) {
                 self.logger.info('Spotify credentials grant failed with ' + err);
                 defer.reject(err);
@@ -668,10 +715,9 @@ ControllerSpotify.prototype.initializeSpotifyBrowsingFacility = function () {
 
     var refreshToken = self.config.get('refresh_token', 'none');
     if (refreshToken !== 'none' && refreshToken !== null && refreshToken !== undefined) {
-        self.spotifyApiConnect()
-            .then(()=>{
+        self.spotifyApiConnect().then(function() {
+                console.log('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')
                 self.logger.info('Spotify Successfully logged in');
-                self.isLoggedIn = true;
                 self.getRoot();
                 self.addToBrowseSources();
             }).fail(function (err) {
@@ -679,6 +725,27 @@ ControllerSpotify.prototype.initializeSpotifyBrowsingFacility = function () {
             });
     }
 }
+
+ControllerSpotify.prototype.getUserInformations = function () {
+    var self = this;
+    var defer = libQ.defer();
+
+    self.spotifyApi.getMe()
+        .then(function(data) {
+            if (data && data.body) {
+                console.log(JSON.stringify(data.body))
+                self.loggedInUsername = data.body.display_name || data.body.id;
+                self.userCountry = data.body.country || 'US';
+                self.isLoggedIn = true;
+                defer.resolve('');
+            }
+        }, function(err) {
+            defer.reject('');
+            self.logger.error('Failed to retrieve user informations: ' + err);
+        });
+
+    return defer.promise;
+};
 
 // CACHE
 

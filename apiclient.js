@@ -11,7 +11,9 @@ superagent.get('http://127.0.0.1:9876/status')
 */
 superagent.post('http://127.0.0.1:9876/player/play')
     .accept('application/json')
-    .send({'uri': 'track:16k2KM42CJEZ8uOC4v1vGV'})
+    .send({uri:'spotify:track:16k2KM42CJEZ8uOC4v1vGV'})
     .then((results) => {
         console.log(results.body);
+    }).catch((err) => {
+        console.log(err);
     })
