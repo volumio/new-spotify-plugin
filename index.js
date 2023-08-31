@@ -197,8 +197,9 @@ ControllerSpotify.prototype.parseEventState = function (event) {
             pushStateforEvent = false;
         case 'volume':
             try {
-                var spotifyLastVolume = parseInt(event.data.value*100);
-                self.commandRouter.volumiosetvolume(spotifyLastVolume);
+                if (event.data && event.data.value !== undefined) {
+                    self.onSpotifyVolumeChange(parseInt(event.data.value));
+                }
             } catch(e) {
                 self.logger.error('Failed to parse Spotify volume event: ' + e);
             }
@@ -402,13 +403,6 @@ ControllerSpotify.prototype.seek = function (position) {
     this.sendSpotifyLocalApiCommandWithPayload('/player/seek', { position: position });
 };
 
-ControllerSpotify.prototype.setSpotifyVolume = function (volumioVolume) {
-    this.logger.info('Spotify volume to: ' + volumioVolume);
-
-    this.currentSpotifyVolume = volumioVolume;
-    this.sendSpotifyLocalApiCommandWithPayload('/player/volume', { volume: volumioVolume / 100 });
-};
-
 ControllerSpotify.prototype.random = function (value) {
     this.logger.info('Spotify Random: ' + value);
 
@@ -419,6 +413,36 @@ ControllerSpotify.prototype.random = function (value) {
 ControllerSpotify.prototype.repeat = function (value, repeatSingle) {
     // to implement
 };
+
+// Volume events
+
+ControllerSpotify.prototype.onSpotifyVolumeChange = function (volume) {
+    var self = this;
+
+    var currentSpotifyVolume;
+    var currentVolumioVolume;
+
+    if (volume !== currentVolumioVolume) {
+        self.logger.info('Setting Volumio Volume from Spotify: ' + volume);
+        currentSpotifyVolume = volume;
+        currentVolumioVolume = currentSpotifyVolume;
+        self.commandRouter.volumiosetvolume(currentVolumioVolume);
+    }
+
+};
+
+ControllerSpotify.prototype.onVolumioVolumeChange = function (volume) {
+    var self = this;
+
+    if (volume !== currentSpotifyVolume) {
+        self.logger.info('Setting Spotify Volume from Volumio: ' + volume);
+        currentVolumioVolume = volume;
+        currentSpotifyVolume = currentVolumioVolume;
+        // Commented as it does not work properly
+        //self.sendSpotifyLocalApiCommandWithPayload('/volume', { volume: currentSpotifyVolume });
+    }
+};
+
 
 ControllerSpotify.prototype.clearAddPlayTrack = function (track) {
     var self = this;
@@ -443,14 +467,12 @@ ControllerSpotify.prototype.startSocketStateListener = function () {
 
     self.stateSocket.on('pushState', function (data) {
        currentVolumioState = data;
-       if (data && data.volume && data.volume !== self.currentSpotifyVolume) {
+       if (data && data.volume) {
            var currentVolume = data.volume;
            if (data.mute === true) {
                currentVolume = 0;
            }
-           // TODO FIX THIS, AS USUAL
-           //self.logger.info('Aligning Spotify Volume to: ' + currentVolume);
-           //self.setSpotifyVolume(currentVolume);
+           self.onVolumioVolumeChange(currentVolume);
        }
     });
 };
