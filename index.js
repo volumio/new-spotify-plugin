@@ -461,9 +461,11 @@ ControllerSpotify.prototype.createConfigFile = function () {
 
     var devicename = this.commandRouter.sharedVars.get('system.name');
     var selectedBitrate = self.config.get('bitrate_number', '320').toString();
+    var icon = self.config.get('icon', 'avr')
 
     const conf = template.replace('${device_name}', devicename)
-        .replace('${bitrate_number}', selectedBitrate);
+        .replace('${bitrate_number}', selectedBitrate)
+        .replace('${device_type}', icon);
 
     fs.writeFile(configFileDestinationPath, conf, (err) => {
         if (err) {
