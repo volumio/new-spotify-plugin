@@ -2393,7 +2393,7 @@ ControllerSpotify.prototype.getTrack = function (id) {
                     trackType: 'spotify'
                 };
                 response.push(item);
-                self.debugLog('GET TRACK: ' + response)
+                self.debugLog('GET TRACK: ' + JSON.stringify(response));
                 defer.resolve(response);
             });
         });
