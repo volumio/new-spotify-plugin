@@ -968,6 +968,7 @@ ControllerSpotify.prototype.getUserInformations = function () {
     self.spotifyApi.getMe()
         .then(function(data) {
             if (data && data.body) {
+                self.debugLog('User informations: ' + JSON.stringify(data.body));
                 self.loggedInUsername = data.body.display_name || data.body.id;
                 self.userCountry = data.body.country || 'US';
                 self.config.set('logged_username', self.loggedInUsername);
@@ -1309,30 +1310,25 @@ ControllerSpotify.prototype.getMyPlaylists = function (curUri) {
                         ]
                     }
                 };
-                console.log('https://api.spotify.com/v1/users/' + self.loggedInUsername + '/playlists')
-                superagent.get('https://api.spotify.com/v1/users/' + self.loggedInUsername + '/playlists')
-                    .set("Content-Type", "application/json")
-                    .set("Authorization", "Bearer " + self.accessToken)
-                    .query({limit: 50})
-                    .accept('application/json')
-                    .then(function (results) {
-                        //  self.logger.info('Playlist result is: ' + JSON.stringify(results.body));
-                        for (var i in results.body.items) {
-                            var playlist = results.body.items[i];
-                            response.navigation.lists[0].items.push({
-                                service: 'spop',
-                                type: 'playlist',
-                                title: playlist.name,
-                                albumart: self._getAlbumArt(playlist),
-                                uri: 'spotify:user:spotify:playlist:' + playlist.id
-                            });
-                        }
 
-                        defer.resolve(response);
-                    })
-                    .catch(function (err) {
-                        self.logger.info('An error occurred while listing Spotify getMyPlaylists ' + err.message);
-                    });
+            self.spotifyApi.getUserPlaylists(self.loggedInUsername)
+                .then(function(results) {
+                    for (var i in results.body.items) {
+                        var playlist = results.body.items[i];
+                        response.navigation.lists[0].items.push({
+                            service: 'spop',
+                            type: 'playlist',
+                            title: playlist.name,
+                            albumart: self._getAlbumArt(playlist),
+                            uri: 'spotify:user:spotify:playlist:' + playlist.id
+                        });
+                    }
+
+                    defer.resolve(response);
+                },function(err) {
+                    defer.reject('An error listing Spotify Playlists ' + err.message)
+                    self.logger.info('An error occurred while listing Spotify getMyPlaylists ' + err.message);
+                });
             }
         );
 
