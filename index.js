@@ -23,6 +23,8 @@ var selectedBitrate;
 var loggedInUsername;
 var userCountry;
 var seekTimer;
+var restartTimeout;
+var wsConnectionStatus = 'started';
 
 // State management
 var ws;
@@ -67,7 +69,10 @@ ControllerSpotify.prototype.getConfigurationFiles = function () {
 ControllerSpotify.prototype.onStop = function () {
     var self = this;
     var defer = libQ.defer();
+
+    self.goLibrespotDaemonWsConnection('stop');
     self.stopLibrespotDaemon();
+
     defer.resolve();
     return defer.promise;
 };
@@ -112,21 +117,44 @@ ControllerSpotify.prototype.getUIConfig = function () {
 
 // Controls
 
-ControllerSpotify.prototype.initializeWsConnection = function () {
+ControllerSpotify.prototype.goLibrespotDaemonWsConnection = function (action) {
     var self = this;
 
     // TODO FIX RECONNECTION WHEN STARTING AND STOPPING THE PLUGIN
     // This is the websocket event listener for the Spotify service
-    if (ws) {
-        ws = ws.terminate();
+
+    if (action === 'start') {
+        wsConnectionStatus = 'started';
+        self.initializeWsConnection();
+    } else if (action === 'stop') {
+        if (ws) {
+            ws.terminate();
+            ws = undefined;
+        }
+        wsConnectionStatus = 'stopped';
+    } else if (action === 'restart'){
+        if (wsConnectionStatus === 'started') {
+            if (restartTimeout) {
+                clearTimeout(restartTimeout);
+            }
+            restartTimeout = setTimeout(()=>{
+                self.initializeWsConnection();
+                restartTimeout = undefined;
+            }, 3000);
+        }
     }
+};
+
+ControllerSpotify.prototype.initializeWsConnection = function () {
+    var self = this;
+
+    self.logger.info('Initializing connection to go-librespot Websocket');
+
     ws = new websocket('ws://localhost:9876/events');
     ws.on('error', function(error){
         self.logger.info('Error connecting to go-librespot Websocket: ' + error);
-        self.onWsConnectionInterruption();
+        self.goLibrespotDaemonWsConnection('restart');
     });
-
-
 
     ws.on('message', function message(data) {
         self.debugLog('received: %s', data);
@@ -138,18 +166,9 @@ ControllerSpotify.prototype.initializeWsConnection = function () {
         self.initializeSpotifyControls();
         ws.on('close', function(){
             self.logger.info('Connection to go-librespot Websocket closed');
-            self.onWsConnectionInterruption();
+            self.goLibrespotDaemonWsConnection('restart');
         });
     });
-};
-
-ControllerSpotify.prototype.onWsConnectionInterruption = function () {
-    var self = this;
-
-    setTimeout(()=>{
-        self.logger.info('Connection to go-librespot Websocket interrupted. Trying to reconnect...');
-        self.initializeWsConnection();
-    }, 2000);
 };
 
 ControllerSpotify.prototype.initializeSpotifyControls = function () {
@@ -199,7 +218,7 @@ ControllerSpotify.prototype.parseEventState = function (event) {
             pushStateforEvent = false;
             break;
         case 'will_play':
-            //todo use this event to start volatile mode?
+            //impro: use this event to free up audio device when starting volatile?
             pushStateforEvent = false;
             break;
         case 'playing':
@@ -474,6 +493,7 @@ ControllerSpotify.prototype.onVolumioVolumeChange = function (volume) {
         currentVolumioVolume = volume;
         currentSpotifyVolume = currentVolumioVolume;
         // Commented as it does not work properly
+        // TODO SYNC STATUS VOLUME
         //self.sendSpotifyLocalApiCommandWithPayload('/volume', { volume: currentSpotifyVolume });
     }
 };
@@ -536,11 +556,11 @@ ControllerSpotify.prototype.initializeLibrespotDaemon = function () {
             return self.startLibrespotDaemon();
         })
         .then(function() {
-            return self.initializeWsConnection();
-        })
-        .then(function () {
             self.logger.info('go-librespot daemon successfully initialized');
-            defer.resolve('');
+            setTimeout(()=>{
+                self.goLibrespotDaemonWsConnection('start');
+                defer.resolve('');
+            }, 3000);
         })
         .fail(function (e) {
             defer.reject(e);
@@ -1271,8 +1291,8 @@ ControllerSpotify.prototype.getMyPlaylists = function (curUri) {
                         ]
                     }
                 };
-
-                superagent.get('https://api.spotify.com/v1/me/playlists')
+                console.log('https://api.spotify.com/v1/users/' + self.loggedInUsername + '/playlists')
+                superagent.get('https://api.spotify.com/v1/users/' + self.loggedInUsername + '/playlists')
                     .set("Content-Type", "application/json")
                     .set("Authorization", "Bearer " + self.accessToken)
                     .query({limit: 50})
