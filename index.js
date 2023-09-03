@@ -22,6 +22,7 @@ var stateSocket = undefined;
 var selectedBitrate;
 var loggedInUsername;
 var userCountry;
+var seekTimer;
 
 // State management
 var ws;
@@ -351,7 +352,7 @@ ControllerSpotify.prototype.pushState = function (state) {
     self.state.bitrate = self.getCurrentBitrate();
     self.debugLog('PUSH STATE SPOTIFY');
     self.debugLog(JSON.stringify(self.state));
-
+    self.seekTimerAction();
     return self.commandRouter.servicePushState(self.state, 'spop');
 };
 
@@ -382,8 +383,8 @@ ControllerSpotify.prototype.sendSpotifyLocalApiCommandWithPayload = function (co
 ControllerSpotify.prototype.pause = function () {
     this.logger.info('Spotify Received pause');
 
-    self.debugLog('SPOTIFY PAUSE');
-    self.debugLog(JSON.stringify(currentVolumioState))
+    this.debugLog('SPOTIFY PAUSE');
+    this.debugLog(JSON.stringify(currentVolumioState))
     this.sendSpotifyLocalApiCommand('/player/pause');
 };
 
@@ -402,8 +403,8 @@ ControllerSpotify.prototype.stop = function () {
     this.logger.info('Spotify Stop');
     var defer = libQ.defer();
 
-    self.debugLog('SPOTIFY STOP');
-    self.debugLog(JSON.stringify(currentVolumioState))
+    this.debugLog('SPOTIFY STOP');
+    this.debugLog(JSON.stringify(currentVolumioState))
     if (!ignoreStopEvent) {
         this.sendSpotifyLocalApiCommand('/player/pause');
     }
@@ -2601,4 +2602,19 @@ ControllerSpotify.prototype.explodeUri = function (uri) {
     }
 
     return defer.promise;
+};
+
+ControllerSpotify.prototype.seekTimerAction = function () {
+    var self = this;
+
+    if (this.state.status === 'play') {
+        if (seekTimer === undefined) {
+            seekTimer = setInterval(() => {
+                this.state.seek = this.state.seek + 1000;
+            }, 1000);
+        }
+    } else {
+        clearInterval(seekTimer);
+        seekTimer = undefined;
+    }
 };
