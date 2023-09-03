@@ -72,6 +72,7 @@ ControllerSpotify.prototype.onStop = function () {
 
     self.goLibrespotDaemonWsConnection('stop');
     self.stopLibrespotDaemon();
+    self.stopSocketStateListener();
 
     defer.resolve();
     return defer.promise;
@@ -119,9 +120,6 @@ ControllerSpotify.prototype.getUIConfig = function () {
 
 ControllerSpotify.prototype.goLibrespotDaemonWsConnection = function (action) {
     var self = this;
-
-    // TODO FIX RECONNECTION WHEN STARTING AND STOPPING THE PLUGIN
-    // This is the websocket event listener for the Spotify service
 
     if (action === 'start') {
         wsConnectionStatus = 'started';
@@ -488,6 +486,7 @@ ControllerSpotify.prototype.onSpotifyVolumeChange = function (volume) {
 ControllerSpotify.prototype.onVolumioVolumeChange = function (volume) {
     var self = this;
 
+    // TODO FIX THIS WITHOUT LOOPS
     if (volume !== currentSpotifyVolume) {
         self.logger.info('Setting Spotify Volume from Volumio: ' + volume);
         currentVolumioVolume = volume;
@@ -495,6 +494,24 @@ ControllerSpotify.prototype.onVolumioVolumeChange = function (volume) {
         // Commented as it does not work properly
         // TODO SYNC STATUS VOLUME
         //self.sendSpotifyLocalApiCommandWithPayload('/volume', { volume: currentSpotifyVolume });
+    }
+};
+
+ControllerSpotify.prototype.alignSpotifyVolumeToVolumioVolume = function () {
+    var self = this;
+
+    self.logger.info('Aligning Spotify Volume to Volumio Volume');
+
+    var currentVolumioVolume = self.commandRouter.volumioretrievevolume();
+    if (currentVolumioVolume && currentVolumioVolume.vol !== undefined && currentVolumioVolume.disableVolumeContro !== true) {
+        if (currentVolumioVolume.mute === true) {
+            currentVolumioVolume = 0;
+        } else {
+            currentVolumioVolume = currentVolumioVolume.vol;
+        }
+        self.logger.info('Setting Spotify Volume from Volumio: ' + currentVolumioVolume);
+        currentSpotifyVolume = currentVolumioVolume;
+        self.sendSpotifyLocalApiCommandWithPayload('/volume', { volume: currentSpotifyVolume });
     }
 };
 
@@ -559,6 +576,7 @@ ControllerSpotify.prototype.initializeLibrespotDaemon = function () {
             self.logger.info('go-librespot daemon successfully initialized');
             setTimeout(()=>{
                 self.goLibrespotDaemonWsConnection('start');
+                self.alignSpotifyVolumeToVolumioVolume();
                 defer.resolve('');
             }, 3000);
         })
