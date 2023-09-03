@@ -29,6 +29,7 @@ var currentVolumioState;
 var currentSpotifyVolume;
 var currentVolumioVolume;
 var isInVolatileMode = false;
+var ignoreStopEvent = false;
 
 
 // Debug
@@ -113,6 +114,7 @@ ControllerSpotify.prototype.getUIConfig = function () {
 ControllerSpotify.prototype.initializeWsConnection = function () {
     var self = this;
 
+    // TODO FIX RECONNECTION WHEN STARTING AND STOPPING THE PLUGIN
     // This is the websocket event listener for the Spotify service
     if (ws) {
         ws = ws.terminate();
@@ -126,7 +128,7 @@ ControllerSpotify.prototype.initializeWsConnection = function () {
 
 
     ws.on('message', function message(data) {
-        console.log('received: %s', data);
+        self.debugLog('received: %s', data);
         self.parseEventState(JSON.parse(data));
     });
 
@@ -186,7 +188,7 @@ ControllerSpotify.prototype.parseEventState = function (event) {
     // create a switch case which handles types of events
     // and updates the state accordingly
     switch (event.type) {
-        case 'track':
+        case 'metadata':
             self.state.title = event.data.name;
             self.state.duration = self.parseDuration(event.data.duration);
             self.state.uri = event.data.uri;
@@ -195,14 +197,25 @@ ControllerSpotify.prototype.parseEventState = function (event) {
             self.state.albumart = event.data.album_cover_url;
             pushStateforEvent = false;
             break;
+        case 'will_play':
+            //todo use this event to start volatile mode?
+            pushStateforEvent = false;
+            break;
         case 'playing':
             self.state.status = 'play';
             self.identifyPlaybackMode(event.data);
+            setTimeout(()=>{
+                self.pushState();
+            }, 300);
             pushStateforEvent = true;
             break;
         case 'paused':
             self.state.status = 'pause';
             self.identifyPlaybackMode(event.data);
+            pushStateforEvent = true;
+            break;
+        case 'stopped':
+            self.state.status = 'stop';
             pushStateforEvent = true;
             break;
         case 'seek':
@@ -231,20 +244,6 @@ ControllerSpotify.prototype.parseEventState = function (event) {
     if (pushStateforEvent) {
         self.pushState(self.state);
     }
-
-    /*
-    if (event && event.data && event.data.play_origin && event.data.play_origin === 'go-librespot') {
-        self.isSpotifyPlayingInVolatileMode = false;
-        self.pushState(self.state);
-    } else {
-        if (self.isSpotifyPlayingInVolatileMode) {
-            self.pushState(self.state);
-        } else {
-            self.initializeSpotifyPlaybackInVolatileMode();
-        }
-    }
-
-     */
 };
 
 ControllerSpotify.prototype.identifyPlaybackMode = function (data) {
@@ -259,8 +258,9 @@ ControllerSpotify.prototype.identifyPlaybackMode = function (data) {
         isInVolatileMode = true;
     }
 
-
-    if (isInVolatileMode && currentVolumioState.service !== 'spop') {
+    // Refactor in order to handle the case where current service is spop but not in volatile mode
+    if ((isInVolatileMode && currentVolumioState.service !== 'spop') ||
+        (isInVolatileMode && currentVolumioState.service === 'spop' && currentVolumioState.volatile !== true)) {
         self.initializeSpotifyPlaybackInVolatileMode();
     }
 
@@ -270,12 +270,17 @@ ControllerSpotify.prototype.initializeSpotifyPlaybackInVolatileMode = function (
     var self = this;
 
     self.logger.info('Spotify is playing in volatile mode');
+    ignoreStopEvent = true;
 
     self.commandRouter.stateMachine.setConsumeUpdateService(undefined);
     self.context.coreCommand.stateMachine.setVolatile({
         service: 'spop',
         callback: self.libRespotGoUnsetVolatile()
     });
+
+    setTimeout(()=>{
+        ignoreStopEvent = false;
+    }, 2000);
 };
 
 ControllerSpotify.prototype.parseDuration = function (spotifyDuration) {
@@ -316,10 +321,9 @@ ControllerSpotify.prototype.parseArtists = function (spotifyArtists) {
 ControllerSpotify.prototype.libRespotGoUnsetVolatile = function () {
     var self = this;
     var defer = libQ.defer();
-    console.log('UNSET VOLATILE');
 
-    console.log('PAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')
-    console.log(JSON.stringify(currentVolumioState))
+    self.debugLog('UNSET VOLATILE');
+    self.debugLog(JSON.stringify(currentVolumioState))
 
     if (currentVolumioState && currentVolumioState.status && currentVolumioState.status !== 'stop') {
         self.logger.info('Setting Spotify stop after unset volatile call');
@@ -335,6 +339,8 @@ ControllerSpotify.prototype.libRespotGoUnsetVolatile = function () {
 ControllerSpotify.prototype.getState = function () {
     var self = this;
 
+    self.debugLog('GET STATE SPOTIFY');
+    self.debugLog(JSON.stringify(self.state));
     return self.state;
 };
 
@@ -343,6 +349,9 @@ ControllerSpotify.prototype.pushState = function (state) {
     var self = this;
 
     self.state.bitrate = self.getCurrentBitrate();
+    self.debugLog('PUSH STATE SPOTIFY');
+    self.debugLog(JSON.stringify(self.state));
+
     return self.commandRouter.servicePushState(self.state, 'spop');
 };
 
@@ -373,8 +382,8 @@ ControllerSpotify.prototype.sendSpotifyLocalApiCommandWithPayload = function (co
 ControllerSpotify.prototype.pause = function () {
     this.logger.info('Spotify Received pause');
 
-    console.log('PAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')
-    console.log(JSON.stringify(currentVolumioState))
+    self.debugLog('SPOTIFY PAUSE');
+    self.debugLog(JSON.stringify(currentVolumioState))
     this.sendSpotifyLocalApiCommand('/player/pause');
 };
 
@@ -391,11 +400,16 @@ ControllerSpotify.prototype.play = function () {
 
 ControllerSpotify.prototype.stop = function () {
     this.logger.info('Spotify Stop');
+    var defer = libQ.defer();
 
-    console.log('PAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')
-    console.log('TOPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPP')
-    console.log(JSON.stringify(currentVolumioState))
-    this.sendSpotifyLocalApiCommand('/player/pause');
+    self.debugLog('SPOTIFY STOP');
+    self.debugLog(JSON.stringify(currentVolumioState))
+    if (!ignoreStopEvent) {
+        this.sendSpotifyLocalApiCommand('/player/pause');
+    }
+
+    defer.resolve('');
+    return defer.promise;
 };
 
 
@@ -467,6 +481,7 @@ ControllerSpotify.prototype.onVolumioVolumeChange = function (volume) {
 ControllerSpotify.prototype.clearAddPlayTrack = function (track) {
     var self = this;
     self.commandRouter.pushConsoleMessage('[' + Date.now() + '] ' + 'ControllerSpotify::clearAddPlayTrack');
+    self.resetSpotifyState();
 
     return self.sendSpotifyLocalApiCommandWithPayload('/player/play', { uri: track.uri });
 };
@@ -621,7 +636,7 @@ ControllerSpotify.prototype.createConfigFile = function () {
 
 ControllerSpotify.prototype.isOauthLoginAlreadyConfiguredOnDaemon = function () {
     var self = this;
-    console.log(credentialsPath)
+
     try {
         var credentialsFile = fs.readFileSync(credentialsPath, {encoding: 'utf8'}).toString();
     } catch (e) {
@@ -699,9 +714,9 @@ ControllerSpotify.prototype.spotifyClientCredentialsGrant = function () {
         self.refreshAccessToken()
             .then(function (data) {
                 self.spotifyAccessToken = data.body['accessToken'];
-                console.log('------------------------------------------------------ ACCESS TOKEN ------------------------------------------------------');
-                console.log(self.spotifyAccessToken);
-                console.log('------------------------------------------------------ ACCESS TOKEN ------------------------------------------------------');
+                self.debugLog('------------------------------------------------------ ACCESS TOKEN ------------------------------------------------------');
+                self.debugLog(self.spotifyAccessToken);
+                self.debugLog('------------------------------------------------------ ACCESS TOKEN ------------------------------------------------------');
                 self.config.set('access_token', self.spotifyAccessToken);
                 self.spotifyApi.setAccessToken(self.spotifyAccessToken);
                 self.spotifyAccessTokenExpiration = data.body['expiresInSeconds'] * 1000 + now;
@@ -717,7 +732,7 @@ ControllerSpotify.prototype.spotifyClientCredentialsGrant = function () {
 
 ControllerSpotify.prototype.oauthLogin = function (data) {
     var self=this;
-    console.log(JSON.stringify(data));
+
     if (data && data.refresh_token) {
         self.logger.info('Saving Spotify Refresh Token');
         self.config.set('refresh_token', data.refresh_token);
@@ -898,7 +913,6 @@ ControllerSpotify.prototype.initializeSpotifyBrowsingFacility = function () {
     var refreshToken = self.config.get('refresh_token', 'none');
     if (refreshToken !== 'none' && refreshToken !== null && refreshToken !== undefined) {
         self.spotifyApiConnect().then(function() {
-                console.log('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')
                 self.logger.info('Spotify Successfully logged in');
                 self.getRoot();
                 self.addToBrowseSources();
@@ -915,7 +929,6 @@ ControllerSpotify.prototype.getUserInformations = function () {
     self.spotifyApi.getMe()
         .then(function(data) {
             if (data && data.body) {
-                console.log(JSON.stringify(data.body))
                 self.loggedInUsername = data.body.display_name || data.body.id;
                 self.userCountry = data.body.country || 'US';
                 self.config.set('logged_username', self.loggedInUsername);
@@ -2531,7 +2544,7 @@ ControllerSpotify.prototype.debugLog = function (stringToLog) {
     var self = this;
 
     if (isDebugMode) {
-        console.log('SPOTIFY ' + stringToLog);
+        console.log('SPOTIFY: ' + stringToLog);
     }
 };
 
