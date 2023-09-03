@@ -24,6 +24,7 @@ var loggedInUsername;
 var userCountry;
 
 // State management
+var ws;
 var currentVolumioState;
 var currentSpotifyVolume;
 var currentVolumioVolume;
@@ -113,14 +114,16 @@ ControllerSpotify.prototype.initializeWsConnection = function () {
     var self = this;
 
     // This is the websocket event listener for the Spotify service
-    var ws = new websocket('ws://localhost:9876/events');
+    if (ws) {
+        ws = ws.terminate();
+    }
+    ws = new websocket('ws://localhost:9876/events');
     ws.on('error', function(error){
         self.logger.info('Error connecting to go-librespot Websocket: ' + error);
-        setTimeout(()=>{
-            self.logger.info('Trying to reconnect to go-librespot Websocket');
-            self.initializeWsConnection();
-        }, 2000);
+        self.onWsConnectionInterruption();
     });
+
+
 
     ws.on('message', function message(data) {
         console.log('received: %s', data);
@@ -128,8 +131,22 @@ ControllerSpotify.prototype.initializeWsConnection = function () {
     });
 
     ws.on('open', function () {
+        self.logger.info('Connection to go-librespot Websocket established');
         self.initializeSpotifyControls();
+        ws.on('close', function(){
+            self.logger.info('Connection to go-librespot Websocket closed');
+            self.onWsConnectionInterruption();
+        });
     });
+};
+
+ControllerSpotify.prototype.onWsConnectionInterruption = function () {
+    var self = this;
+
+    setTimeout(()=>{
+        self.logger.info('Connection to go-librespot Websocket interrupted. Trying to reconnect...');
+        self.initializeWsConnection();
+    }, 2000);
 };
 
 ControllerSpotify.prototype.initializeSpotifyControls = function () {
@@ -235,14 +252,13 @@ ControllerSpotify.prototype.identifyPlaybackMode = function (data) {
 
     // This functions checks if Spotify is playing in volatile mode or in Volumio mode (playback started from Volumio UI)
     // play_origin = 'go-librespot' means that Spotify is playing in Volumio mode
-    // play_origin = 'your_library' means that Spotify is playing in volatile mode
+    // play_origin = 'your_library' or 'playlist' means that Spotify is playing in volatile mode
     if (data && data.play_origin && data.play_origin === 'go-librespot') {
         isInVolatileMode = false;
-    }
-
-    if (data && data.play_origin && data.play_origin === 'your_library') {
+    } else {
         isInVolatileMode = true;
     }
+
 
     if (isInVolatileMode && currentVolumioState.service !== 'spop') {
         self.initializeSpotifyPlaybackInVolatileMode();
@@ -255,23 +271,11 @@ ControllerSpotify.prototype.initializeSpotifyPlaybackInVolatileMode = function (
 
     self.logger.info('Spotify is playing in volatile mode');
 
-    try {
-        self.commandRouter.stateMachine.unSetVolatile();
-        self.commandRouter.volumioStop().then(()=>{
-            self.commandRouter.stateMachine.setConsumeUpdateService(undefined);
-            self.context.coreCommand.stateMachine.setVolatile({
-                service: 'spop',
-                callback: self.spotConnUnsetVolatile()
-            });
-        })
-    } catch(e) {
-        self.commandRouter.stateMachine.unSetVolatile();
-        self.commandRouter.stateMachine.setConsumeUpdateService(undefined);
-        self.context.coreCommand.stateMachine.setVolatile({
-            service: 'spop',
-            callback: self.spotConnUnsetVolatile()
-        });
-    }
+    self.commandRouter.stateMachine.setConsumeUpdateService(undefined);
+    self.context.coreCommand.stateMachine.setVolatile({
+        service: 'spop',
+        callback: self.libRespotGoUnsetVolatile()
+    });
 };
 
 ControllerSpotify.prototype.parseDuration = function (spotifyDuration) {
@@ -309,12 +313,23 @@ ControllerSpotify.prototype.parseArtists = function (spotifyArtists) {
 }
 
 
-ControllerSpotify.prototype.spotConnUnsetVolatile = function () {
+ControllerSpotify.prototype.libRespotGoUnsetVolatile = function () {
     var self = this;
-
+    var defer = libQ.defer();
     console.log('UNSET VOLATILE');
 
-    return this.stop();
+    console.log('PAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')
+    console.log(JSON.stringify(currentVolumioState))
+
+    if (currentVolumioState && currentVolumioState.status && currentVolumioState.status !== 'stop') {
+        self.logger.info('Setting Spotify stop after unset volatile call');
+        setTimeout(()=>{
+            self.stop();
+            defer.resolve('');
+        }, 500);
+    } else {
+        defer.resolve('');
+    }
 }
 
 ControllerSpotify.prototype.getState = function () {
@@ -358,6 +373,8 @@ ControllerSpotify.prototype.sendSpotifyLocalApiCommandWithPayload = function (co
 ControllerSpotify.prototype.pause = function () {
     this.logger.info('Spotify Received pause');
 
+    console.log('PAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')
+    console.log(JSON.stringify(currentVolumioState))
     this.sendSpotifyLocalApiCommand('/player/pause');
 };
 
@@ -375,6 +392,9 @@ ControllerSpotify.prototype.play = function () {
 ControllerSpotify.prototype.stop = function () {
     this.logger.info('Spotify Stop');
 
+    console.log('PAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')
+    console.log('TOPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPP')
+    console.log(JSON.stringify(currentVolumioState))
     this.sendSpotifyLocalApiCommand('/player/pause');
 };
 
@@ -496,11 +516,15 @@ ControllerSpotify.prototype.initializeLibrespotDaemon = function () {
     this.selectedBitrate = self.config.get('bitrate_number', '320').toString();
 
     self.createConfigFile()
-        .then(self.startLibrespotDaemon())
-        .then(self.initializeWsConnection())
-        .then(()=> {
+        .then(function() {
+            return self.startLibrespotDaemon();
+        })
+        .then(function() {
+            return self.initializeWsConnection();
+        })
+        .then(function () {
             self.logger.info('go-librespot daemon successfully initialized');
-            defer.resolve();
+            defer.resolve('');
         })
         .fail(function (e) {
             defer.reject(e);
