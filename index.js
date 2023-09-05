@@ -73,6 +73,7 @@ ControllerSpotify.prototype.onStop = function () {
     self.goLibrespotDaemonWsConnection('stop');
     self.stopLibrespotDaemon();
     self.stopSocketStateListener();
+    self.removeToBrowseSources();
 
     defer.resolve();
     return defer.promise;
