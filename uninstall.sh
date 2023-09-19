@@ -1,8 +1,9 @@
 #!/bin/bash
 
-echo "Unistalling Spop dependencies"
+echo "Unistalling go-librespot-daemon"
 
-echo "Removing Spop"
+rm /usr/bin/go-librespot-daemon
+rm /lib/systemd/system/go-librespot-daemon.service
 
 echo "Done"
 echo "pluginuninstallend"
