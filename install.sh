@@ -25,18 +25,24 @@ tar xf $DAEMON_DOWNLOAD_PATH -C /usr/bin/
 rm $DAEMON_DOWNLOAD_PATH
 chmod a+x /usr/bin/go-librespot
 
+echo "Creating data path"
+mkdir /data/go-librespot/
+chown -R volumio:volumio /data/go-librespot/
+
 echo "[Unit]
 Description = go-librespot Daemon
 After = volumio.service
 
 [Service]
 ExecStart=/usr/bin/go-librespot -config_path /tmp/go-librespot-config.yml -credentials_path /data/configuration/music_service/spop/spotifycredentials.json
+WorkingDirectory=/data/go-librespot/
 Restart=always
 StandardOutput=syslog
 StandardError=syslog
 SyslogIdentifier=go-librespot
 User=volumio
 Group=volumio
+Environment=GOTRACEBACK=crash
 [Install]
 WantedBy=multi-user.target" > /lib/systemd/system/go-librespot-daemon.service
 
