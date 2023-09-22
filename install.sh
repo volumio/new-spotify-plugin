@@ -19,11 +19,14 @@ echo "Checking old vollibrespot installs"
 VOLLIB_PATH=/usr/bin/vollibrespot
 VOLLIB_SYSTEMD=/lib/systemd/system/volspotconnect.service
 
+## TODO MAKE IT CONDITIONAL ONLY IF VOLLIBRESPOT IS RUNNING
 killall vollibrespot
 
 [ -f $VOLLIB_PATH ] || rm $VOLLIB_PATH
 [ -f $VOLLIB_SYSTEMD ] || rm $VOLLIB_SYSTEMD
 
+systemctl daemon-reload
+systemctl stop volspotconnect.service
 
 DAEMON_BASE_URL=https://github.com/devgianlu/go-librespot/releases/download/v
 VERSION=0.0.2
