@@ -13,6 +13,18 @@ elif  [ $ARCH = "i386" ] || [ $ARCH = "i686" ] || [ $ARCH = "x86" ]; then
         exit 1
 fi
 
+
+echo "Checking old vollibrespot installs"
+
+VOLLIB_PATH=/usr/bin/vollibrespot
+VOLLIB_SYSTEMD=/lib/systemd/system/volspotconnect.service
+
+killall vollibrespot
+
+[ -f $VOLLIB_PATH ] || rm $VOLLIB_PATH
+[ -f $VOLLIB_SYSTEMD ] || rm $VOLLIB_SYSTEMD
+
+
 DAEMON_BASE_URL=https://github.com/devgianlu/go-librespot/releases/download/v
 VERSION=0.0.2
 DAEMON_ARCHIVE=go-librespot_linux_$ARCH.tar.gz
@@ -25,26 +37,40 @@ tar xf $DAEMON_DOWNLOAD_PATH -C /usr/bin/
 rm $DAEMON_DOWNLOAD_PATH
 chmod a+x /usr/bin/go-librespot
 
-echo "Creating data path"
-mkdir /data/go-librespot/
-chown -R volumio:volumio /data/go-librespot/
+echo "Creating Start Script"
+
+echo "#!/bin/sh
+
+# Traceback Setting
+export GOTRACEBACK=crash
+
+# Data dir
+DAEMON_DATA_PATH=/data/go-librespot/
+[ -d $DAEMON_DATA_PATH ] || mkdir $DAEMON_DATA_PATH
+
+echo 'Librespot-go daemon starting...'
+/usr/bin/go-librespot -config_path /tmp/go-librespot-config.yml -credentials_path /data/configuration/music_service/spop/spotifycredentials.json" > /bin/start-go-liberspot.sh
+
+chmod a+x /bin/start-go-liberspot.sh
+
 
 echo "[Unit]
 Description = go-librespot Daemon
 After = volumio.service
 
 [Service]
-ExecStart=/usr/bin/go-librespot -config_path /tmp/go-librespot-config.yml -credentials_path /data/configuration/music_service/spop/spotifycredentials.json
-WorkingDirectory=/data/go-librespot/
+ExecStart=/bin/start-go-liberspot.sh
 Restart=always
+RestartSec=3
 StandardOutput=syslog
 StandardError=syslog
 SyslogIdentifier=go-librespot
 User=volumio
 Group=volumio
-Environment=GOTRACEBACK=crash
 [Install]
 WantedBy=multi-user.target" > /lib/systemd/system/go-librespot-daemon.service
+
+systemctl daemon-reload
 
 #required to end the plugin install
 echo "plugininstallend"
