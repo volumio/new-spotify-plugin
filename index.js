@@ -36,7 +36,7 @@ var ignoreStopEvent = false;
 
 
 // Debug
-var isDebugMode = false;
+var isDebugMode = true;
 
 // Define the ControllerSpotify class
 module.exports = ControllerSpotify;
@@ -156,7 +156,7 @@ ControllerSpotify.prototype.initializeWsConnection = function () {
     });
 
     ws.on('message', function message(data) {
-        self.debugLog('received: %s', data);
+        self.debugLog('received: ' + data);
         self.parseEventState(JSON.parse(data));
     });
 
@@ -214,6 +214,7 @@ ControllerSpotify.prototype.parseEventState = function (event) {
             self.state.artist = self.parseArtists(event.data.artist_names);
             self.state.album = event.data.album_name;
             self.state.albumart = event.data.album_cover_url;
+            self.state.seek = event.data.position;
             pushStateforEvent = false;
             break;
         case 'will_play':
