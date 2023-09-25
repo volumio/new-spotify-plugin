@@ -15,12 +15,12 @@ echo "Downloading GO"
 if [ "$ARCH" = "arm" ] || [ "$ARCH" = "armv7" ] ;then
   echo "Getting go for armhf"
   wget https://go.dev/dl/go1.20.6.linux-armv6l.tar.gz
-  tar -C /usr/local -xzf go1.20.6.linux-armv6l.tar.gz
+  sudo tar -C /usr/local -xzf go1.20.6.linux-armv6l.tar.gz
   rm go1.20.6.linux-armv6l.tar.gz
 else
   echo "Getting go for x64"
   wget https://go.dev/dl/go1.20.6.linux-amd64.tar.gz
-  tar -C /usr/local -xzf go1.20.6.linux-amd64.tar.gz
+  sudo tar -C /usr/local -xzf go1.20.6.linux-amd64.tar.gz
   rm go1.20.6.linux-amd64.tar.gz
 fi
 

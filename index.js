@@ -21,6 +21,7 @@ var stateSocket = undefined;
 
 var selectedBitrate;
 var loggedInUsername;
+var loggedInUserId;
 var userCountry;
 var seekTimer;
 var restartTimeout;
@@ -774,6 +775,8 @@ ControllerSpotify.prototype.spotifyClientCredentialsGrant = function () {
 ControllerSpotify.prototype.oauthLogin = function (data) {
     var self=this;
 
+    self.logger.info('Executing Spotify Oauth Login');
+
     if (data && data.refresh_token) {
         self.logger.info('Saving Spotify Refresh Token');
         self.config.set('refresh_token', data.refresh_token);
@@ -863,6 +866,7 @@ ControllerSpotify.prototype.resetSpotifyCredentials = function () {
     self.accessToken = undefined;
     self.spotifyAccessTokenExpiration = undefined;
     self.loggedInUsername = undefined;
+    self.loggedInUserId = undefined;
 };
 
 ControllerSpotify.prototype.deleteCredentialsFile = function () {
@@ -972,8 +976,10 @@ ControllerSpotify.prototype.getUserInformations = function () {
             if (data && data.body) {
                 self.debugLog('User informations: ' + JSON.stringify(data.body));
                 self.loggedInUsername = data.body.display_name || data.body.id;
+                self.loggedInUserId = data.body.id;
                 self.userCountry = data.body.country || 'US';
                 self.config.set('logged_username', self.loggedInUsername);
+                self.config.set('logged_user_id', self.loggedInUserId);
                 self.isLoggedIn = true;
                 defer.resolve('');
             }
@@ -1312,8 +1318,8 @@ ControllerSpotify.prototype.getMyPlaylists = function (curUri) {
                         ]
                     }
                 };
-
-            self.spotifyApi.getUserPlaylists(self.loggedInUsername)
+            //TODO SET PROPER LIMITS
+            self.spotifyApi.getUserPlaylists(self.loggedInUserId)
                 .then(function(results) {
                     for (var i in results.body.items) {
                         var playlist = results.body.items[i];
