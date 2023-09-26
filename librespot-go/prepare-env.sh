@@ -8,7 +8,7 @@ HARDWARE=$(cat /etc/os-release | grep ^VOLUMIO_HARDWARE | tr -d 'VOLUMIO_HARDWAR
 
 echo "Installing dependencies"
 sudo apt-get update
-sudo apt-get install -y libasound2-dev build-essential
+sudo apt-get install -y libasound2-dev build-essential libogg-dev libvorbis-dev
 
 echo "Downloading GO"
 
