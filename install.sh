@@ -4,8 +4,10 @@ echo "Installing Go-librespot"
 
 ARCH=$(cat /etc/os-release | grep ^VOLUMIO_ARCH | tr -d 'VOLUMIO_ARCH="')
 
-if [ $ARCH = "armv7" ] || [ $ARCH = "armv6" ] || [ $ARCH = "armhf" ] || [ $ARCH = "arm" ]; then
-	ARCH="armv6"
+if [ $ARCH = "arm" ]; then
+	ARCH="armv6_rpi"
+elif [ $ARCH = "armv7" ]; then
+        ARCH="armv6"
 elif  [ $ARCH = "amd64" ] || [ $ARCH = "x86_64" ] || [ $ARCH = "x64" ]; then
 	ARCH="x86_64"
 elif  [ $ARCH = "i386" ] || [ $ARCH = "i686" ] || [ $ARCH = "x86" ]; then
