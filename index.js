@@ -108,6 +108,14 @@ ControllerSpotify.prototype.getUIConfig = function () {
                 uiconf.sections[1].content[0].hidden = true;
                 uiconf.sections[1].content[1].hidden = false;
             }
+            var bitrateNumber = self.config.get('bitrate_number', 320);
+            uiconf.sections[2].content[0].value.value = bitrateNumber
+            uiconf.sections[2].content[0].value.label = self.getLabelForSelect(uiconf.sections[2].content[0].options, bitrateNumber);
+
+            var icon = self.config.get('icon', 'avr');
+            uiconf.sections[2].content[2].value.value = icon;
+            uiconf.sections[2].content[2].value.label =  self.getLabelForSelect(uiconf.sections[2].content[2].options, icon);
+
             defer.resolve(uiconf);
         })
         .fail(function (error) {
@@ -2735,4 +2743,13 @@ ControllerSpotify.prototype.seekTimerAction = function () {
         clearInterval(seekTimer);
         seekTimer = undefined;
     }
+};
+
+ControllerSpotify.prototype.getLabelForSelect = function (options, key) {
+    var n = options.length;
+    for (var i = 0; i < n; i++) {
+        if (options[i].value === key) { return options[i].label; }
+    }
+
+    return 'VALUE NOT FOUND BETWEEN SELECT OPTIONS!';
 };
