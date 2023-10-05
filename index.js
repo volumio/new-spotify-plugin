@@ -16,7 +16,7 @@ var os = require('os');
 
 var configFileDestinationPath = '/tmp/go-librespot-config.yml';
 var credentialsPath = '/data/configuration/music_service/spop/spotifycredentials.json';
-var spotifyLocalApiEndpointBase = 'http://127.0.0.1:9876';
+var spotifyLocalApiEndpointBase = 'http://127.0.0.1:9879';
 var stateSocket = undefined;
 
 var selectedBitrate;
