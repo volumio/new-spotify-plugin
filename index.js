@@ -158,7 +158,7 @@ ControllerSpotify.prototype.initializeWsConnection = function () {
 
     self.logger.info('Initializing connection to go-librespot Websocket');
 
-    ws = new websocket('ws://localhost:9876/events');
+    ws = new websocket('ws://localhost:9879/events');
     ws.on('error', function(error){
         self.logger.info('Error connecting to go-librespot Websocket: ' + error);
         self.goLibrespotDaemonWsConnection('restart');
