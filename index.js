@@ -26,6 +26,7 @@ var userCountry;
 var seekTimer;
 var restartTimeout;
 var wsConnectionStatus = 'started';
+var isSpotifyTokenBeingRefreshed = false;
 
 // State management
 var ws;
@@ -770,7 +771,7 @@ ControllerSpotify.prototype.spotifyClientCredentialsGrant = function () {
                 self.config.set('access_token', self.spotifyAccessToken);
                 self.spotifyApi.setAccessToken(self.spotifyAccessToken);
                 self.spotifyAccessTokenExpiration = data.body['expiresInSeconds'] * 1000 + now;
-                self.logger.info('New Spotify access token = ' + self.spotifyAccessToken);
+                self.logger.info('New Spotify access token received');
                 defer.resolve();
             }, function (err) {
                 self.logger.info('Spotify credentials grant failed with ' + err);
@@ -920,16 +921,20 @@ ControllerSpotify.prototype.refreshAccessToken = function () {
 
     var refreshToken = self.config.get('refresh_token', 'none');
     if (refreshToken !== 'none' && refreshToken !== null && refreshToken !== undefined) {
+        self.isSpotifyTokenBeingRefreshed = true;
         superagent.post('https://oauth-performer.dfs.volumio.org/spotify/accessToken')
             .send({refreshToken: refreshToken})
             .then(function (results) {
                 if (results && results.body && results.body.accessToken) {
-                    defer.resolve(results)
+                    self.isSpotifyTokenBeingRefreshed = false;
+                    defer.resolve(results);
                 } else {
+                    self.isSpotifyTokenBeingRefreshed = false;
                     defer.resject('No access token received');
                 }
             })
             .catch(function (err) {
+                self.isSpotifyTokenBeingRefreshed = false;
                 self.logger.info('An error occurred while refreshing Spotify Token ' + err);
             });
     }
@@ -943,21 +948,30 @@ ControllerSpotify.prototype.spotifyCheckAccessToken = function () {
     var d = new Date();
     var now = d.getTime();
 
-    if (self.spotifyAccessTokenExpiration < now) {
-        self.refreshAccessToken()
-            .then(function (data) {
-                self.spotifyAccessToken = data.body.accessToken;
-                self.spotifyApi.setAccessToken(data.body.accessToken);
-                self.spotifyAccessTokenExpiration = data.body.expiresInSeconds * 1000 + now;
-                self.logger.info('New access token = ' + self.spotifyAccessToken);
+    if (self.isSpotifyTokenBeingRefreshed) {
+        setInterval(waitForTokenRefresh, 500);
+        function waitForTokenRefresh() {
+            if (!self.isSpotifyTokenBeingRefreshed) {
+                clearInterval(waitForTokenRefresh)
                 defer.resolve();
-            });
+            }
+        }
     } else {
-        defer.resolve();
+        if (self.spotifyAccessTokenExpiration < now) {
+            self.refreshAccessToken()
+                .then(function (data) {
+                    self.spotifyAccessToken = data.body.accessToken;
+                    self.spotifyApi.setAccessToken(data.body.accessToken);
+                    self.spotifyAccessTokenExpiration = data.body.expiresInSeconds * 1000 + now;
+                    self.logger.info('New access token received');
+                    defer.resolve();
+                });
+        } else {
+            defer.resolve();
+        }
     }
 
     return defer.promise;
-
 };
 
 ControllerSpotify.prototype.initializeSpotifyBrowsingFacility = function () {
