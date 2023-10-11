@@ -1,19 +1,26 @@
 var superagent = require('superagent');
 
-var apiEndpoint = 'http://127.0.0.1:9876';
+var apiEndpoint = 'http://127.0.0.1:9879';
 
-/*
-superagent.get('http://127.0.0.1:9876/status')
+
+superagent.post(apiEndpoint + '/player/volume')
     .accept('application/json')
-    .then((results) => {
-        console.log(results.body);
-    })
-*/
-superagent.post('http://127.0.0.1:9876/player/play')
-    .accept('application/json')
-    .send({uri:'spotify:track:16k2KM42CJEZ8uOC4v1vGV'})
+    .send({ 'volume': 50, 'volume_steps': 100 })
     .then((results) => {
         console.log(results.body);
     }).catch((err) => {
         console.log(err);
+    })
+
+
+superagent.get(apiEndpoint + '/status')
+    .accept('application/json')
+    .then((results) => {
+        console.log(results.body);
+    })
+
+superagent.get(apiEndpoint + '/player/volume')
+    .accept('application/json')
+    .then((results) => {
+        console.log(results.body);
     })

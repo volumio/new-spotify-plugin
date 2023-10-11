@@ -16,7 +16,8 @@ var os = require('os');
 
 var configFileDestinationPath = '/tmp/go-librespot-config.yml';
 var credentialsPath = '/data/configuration/music_service/spop/spotifycredentials.json';
-var spotifyLocalApiEndpointBase = 'http://127.0.0.1:9879';
+var spotifyDaemonPort = '9879';
+var spotifyLocalApiEndpointBase = 'http://127.0.0.1:' + spotifyDaemonPort;
 var stateSocket = undefined;
 
 var selectedBitrate;
@@ -159,7 +160,7 @@ ControllerSpotify.prototype.initializeWsConnection = function () {
 
     self.logger.info('Initializing connection to go-librespot Websocket');
 
-    ws = new websocket('ws://localhost:9879/events');
+    ws = new websocket('ws://localhost:' + spotifyDaemonPort + '/events');
     ws.on('error', function(error){
         self.logger.info('Error connecting to go-librespot Websocket: ' + error);
         self.goLibrespotDaemonWsConnection('restart');
@@ -185,6 +186,7 @@ ControllerSpotify.prototype.initializeSpotifyControls = function () {
 
     self.resetSpotifyState();
     self.startSocketStateListener();
+    self.getSpotifyVolume();
 };
 
 ControllerSpotify.prototype.resetSpotifyState = function () {
@@ -483,9 +485,6 @@ ControllerSpotify.prototype.repeat = function (value, repeatSingle) {
 ControllerSpotify.prototype.onSpotifyVolumeChange = function (volume) {
     var self = this;
 
-    var currentSpotifyVolume;
-    var currentVolumioVolume;
-
     if (volume !== currentVolumioVolume) {
         self.logger.info('Setting Volumio Volume from Spotify: ' + volume);
         currentSpotifyVolume = volume;
@@ -498,14 +497,25 @@ ControllerSpotify.prototype.onSpotifyVolumeChange = function (volume) {
 ControllerSpotify.prototype.onVolumioVolumeChange = function (volume) {
     var self = this;
 
-    // TODO FIX THIS WITHOUT LOOPS
-    if (volume !== currentSpotifyVolume) {
+    if (volume !== currentSpotifyVolume && self.checkSpotifyAndVolumioDeltaVolumeIsEnough(currentSpotifyVolume, volume)) {
         self.logger.info('Setting Spotify Volume from Volumio: ' + volume);
         currentVolumioVolume = volume;
         currentSpotifyVolume = currentVolumioVolume;
-        // Commented as it does not work properly
-        // TODO SYNC STATUS VOLUME
-        //self.sendSpotifyLocalApiCommandWithPayload('/volume', { volume: currentSpotifyVolume });
+        self.sendSpotifyLocalApiCommandWithPayload('/player/volume', { volume: currentSpotifyVolume });
+    }
+};
+
+ControllerSpotify.prototype.checkSpotifyAndVolumioDeltaVolumeIsEnough = function (spotifyVolume, volumioVolume) {
+    var self = this;
+
+    self.debugLog('SPOTIFY VOLUME' + spotifyVolume)
+    self.debugLog('VOLUMIO VOLUME' + volumioVolume)
+    try {
+        var isDeltaVolumeEnough = Math.abs(parseInt(spotifyVolume) - parseInt(volumioVolume)) >= 5;
+        self.debugLog('DELTA VOLUME ENOUGH: ' + isDeltaVolumeEnough);
+        return isDeltaVolumeEnough;
+    } catch(e) {
+        return false;
     }
 };
 
@@ -552,7 +562,7 @@ ControllerSpotify.prototype.startSocketStateListener = function () {
 
     self.stateSocket.on('pushState', function (data) {
        currentVolumioState = data;
-       if (data && data.volume) {
+       if (data && data.volume && !data.disableVolumeControl) {
            var currentVolume = data.volume;
            if (data.mute === true) {
                currentVolume = 0;
@@ -2766,4 +2776,18 @@ ControllerSpotify.prototype.getLabelForSelect = function (options, key) {
     }
 
     return 'VALUE NOT FOUND BETWEEN SELECT OPTIONS!';
+};
+
+ControllerSpotify.prototype.getSpotifyVolume = function () {
+    var self = this;
+
+    self.logger.info('Getting Spotify volume');
+    superagent.get(spotifyLocalApiEndpointBase + '/player/volume')
+        .accept('application/json')
+        .then((results) => {
+            if (results && results.body && results.body.value) {
+                self.logger.info('Spotify volume: ' + results.body.value);
+                currentSpotifyVolume = results.body.value;
+            }
+        })
 };
