@@ -105,7 +105,7 @@ ControllerSpotify.prototype.getUIConfig = function () {
         __dirname + '/UIConfig.json')
         .then(function (uiconf) {
             var credentials_type = self.config.get('credentials_type', 'zeroconf');
-            if (self.loggedInUsername !== undefined && credentials_type === 'spotify_token') {
+            if (self.loggedInUserId !== undefined && credentials_type === 'spotify_token') {
                 uiconf.sections[1].content[0].hidden = true;
                 uiconf.sections[1].content[1].hidden = false;
             }
@@ -668,14 +668,14 @@ ControllerSpotify.prototype.createConfigFile = function () {
         .replace('${device_type}', icon);
 
     var credentials_type = self.config.get('credentials_type', 'zeroconf');
-    var logged_username = self.config.get('logged_username', '');
+    var logged_user_id = self.config.get('logged_user_id', '');
     var access_token = self.config.get('access_token', '');
 
-    if (credentials_type === 'spotify_token' && logged_username !== '' && access_token !== '') {
+    if (credentials_type === 'spotify_token' && logged_user_id !== '' && access_token !== '') {
         conf += 'credentials: ' + os.EOL;
         conf += '  type: spotify_token' + os.EOL;
         conf += '  spotify_token:' + os.EOL;
-        conf += '    username: "' + logged_username + '"' + os.EOL;
+        conf += '    username: "' + logged_user_id + '"' + os.EOL;
         conf += '    access_token: "' + access_token + '"';
     } else {
         conf += 'credentials: ' + os.EOL;
@@ -872,7 +872,7 @@ ControllerSpotify.prototype.pushUiConfig = function (broadcastUiConfig) {
 ControllerSpotify.prototype.resetSpotifyCredentials = function () {
     var self=this;
 
-    self.config.set('logged_username', '');
+    self.config.set('logged_user_id', '');
     self.config.set('access_token', '');
     self.config.set('refresh_token', '');
     self.config.set('credentials_type', 'zeroconf');
@@ -883,7 +883,6 @@ ControllerSpotify.prototype.resetSpotifyCredentials = function () {
 
     self.accessToken = undefined;
     self.spotifyAccessTokenExpiration = undefined;
-    self.loggedInUsername = undefined;
     self.loggedInUserId = undefined;
 };
 
@@ -993,10 +992,8 @@ ControllerSpotify.prototype.getUserInformations = function () {
         .then(function(data) {
             if (data && data.body) {
                 self.debugLog('User informations: ' + JSON.stringify(data.body));
-                self.loggedInUsername = data.body.display_name || data.body.id;
                 self.loggedInUserId = data.body.id;
                 self.userCountry = data.body.country || 'US';
-                self.config.set('logged_username', self.loggedInUsername);
                 self.config.set('logged_user_id', self.loggedInUserId);
                 self.isLoggedIn = true;
                 defer.resolve('');
