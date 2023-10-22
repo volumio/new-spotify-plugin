@@ -217,6 +217,7 @@ ControllerSpotify.prototype.resetSpotifyState = function () {
         samplerate: '44.1 KHz',
         bitdepth: '16 bit',
         bitrate: '',
+        codec: 'ogg',
         channels: 2
     };
 };
