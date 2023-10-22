@@ -18,17 +18,30 @@ fi
 
 echo "Checking old vollibrespot installs"
 
+## Spotify legacy
 VOLLIB_PATH=/usr/bin/vollibrespot
 VOLLIB_SYSTEMD=/lib/systemd/system/volspotconnect.service
+if [ -f $VOLLIB_PATH ]; then
+  echo "Clearing old vollibrespot"
+  systemctl stop volspotconnect.service
+  systemctl disable volspotconnect.service
+  killall vollibrespot
+  rm $VOLLIB_PATH
+  [ -f $VOLLIB_SYSTEMD ] || rm $VOLLIB_SYSTEMD
+  systemctl daemon-reload
+  echo "vollibrespot cleared"
+fi
 
-## TODO MAKE IT CONDITIONAL ONLY IF VOLLIBRESPOT IS RUNNING
-killall vollibrespot
+## volspotconnect2
+VOLSPOTCONNECT2_PATH=/data/plugins/music_service/volspotconnect2/
+if [ -d $VOLSPOTCONNECT2_PATH ]; then
+  echo "Clearing old volspotconnect2 plugin"
+  systemctl stop volspotconnect2.service
+  systemctl disable volspotconnect2.service
+  rm -rf $VOLSPOTCONNECT2_PATH
+  echo "volspotconnect2 plugin cleared"
+fi
 
-[ -f $VOLLIB_PATH ] || rm $VOLLIB_PATH
-[ -f $VOLLIB_SYSTEMD ] || rm $VOLLIB_SYSTEMD
-
-systemctl daemon-reload
-systemctl stop volspotconnect.service
 
 DAEMON_BASE_URL=https://github.com/devgianlu/go-librespot/releases/download/v
 VERSION=0.0.7
