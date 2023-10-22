@@ -36,6 +36,13 @@ var currentVolumioVolume;
 var isInVolatileMode = false;
 var ignoreStopEvent = false;
 
+// Volume limiter
+var deltaVolumeTreshold = 2;
+var volumeTimer;
+var apiCallsCounter = 0;
+var apiCallsLimit = 5;
+var apiCallsTimespan = 5000;
+var spotifyVolumeMap;
 
 // Debug
 var isDebugMode = true;
@@ -89,6 +96,8 @@ ControllerSpotify.prototype.onStart = function () {
     self.browseCache = new NodeCache({ stdTTL: 3600, checkperiod: 120 });
     self.initializeLibrespotDaemon();
     self.initializeSpotifyBrowsingFacility();
+    self.startVolumeTimerLimit();
+    self.loadVolumeMap();
     defer.resolve();
     return defer.promise;
 };
@@ -172,7 +181,9 @@ ControllerSpotify.prototype.initializeWsConnection = function () {
 
     ws.on('open', function () {
         self.logger.info('Connection to go-librespot Websocket established');
-        self.initializeSpotifyControls();
+        setTimeout(()=>{
+            self.initializeSpotifyControls();
+        }, 3000);
         ws.on('close', function(){
             self.logger.info('Connection to go-librespot Websocket closed');
             self.goLibrespotDaemonWsConnection('restart');
@@ -256,6 +267,7 @@ ControllerSpotify.prototype.parseEventState = function (event) {
         case 'active':
             //self.state.status = 'play';
             pushStateforEvent = false;
+            self.alignSpotifyVolumeToVolumioVolume();
         case 'volume':
             try {
                 if (event.data && event.data.value !== undefined) {
@@ -484,6 +496,9 @@ ControllerSpotify.prototype.repeat = function (value, repeatSingle) {
 ControllerSpotify.prototype.onSpotifyVolumeChange = function (volume) {
     var self = this;
 
+    // DIRTY HACK: We always receive volume from spotify -1 than the actual volume
+    volume = spotifyVolumeMap[volume];
+    self.debugLog('RECEIVED SPOTIFY VOLUME ' + volume);
     if (volume !== currentVolumioVolume) {
         self.logger.info('Setting Volumio Volume from Spotify: ' + volume);
         currentSpotifyVolume = volume;
@@ -496,21 +511,39 @@ ControllerSpotify.prototype.onSpotifyVolumeChange = function (volume) {
 ControllerSpotify.prototype.onVolumioVolumeChange = function (volume) {
     var self = this;
 
+    self.debugLog('RECEIVED VOLUMIO VOLUME ' + volume);
     if (volume !== currentSpotifyVolume && self.checkSpotifyAndVolumioDeltaVolumeIsEnough(currentSpotifyVolume, volume)) {
         self.logger.info('Setting Spotify Volume from Volumio: ' + volume);
         currentVolumioVolume = volume;
         currentSpotifyVolume = currentVolumioVolume;
-        self.sendSpotifyLocalApiCommandWithPayload('/player/volume', { volume: currentSpotifyVolume });
+        self.setSpotifyDaemonVolume(currentSpotifyVolume);
     }
 };
+
+ControllerSpotify.prototype.setSpotifyDaemonVolume = function (volume) {
+    var self = this;
+
+    // Volume limiter
+    if (apiCallsCounter >= apiCallsLimit) {
+        self.debugLog('VOLUME LIMITER, API calls reached: ' + apiCallsCounter + ' calls in ' + apiCallsTimespan + ' ms');
+    } else {
+        self.debugLog('SETTING SPOTIFY VOLUME ' + volume);
+        apiCallsCounter++;
+        self.sendSpotifyLocalApiCommandWithPayload('/player/volume', { volume: volume });
+    }
+};
+
 
 ControllerSpotify.prototype.checkSpotifyAndVolumioDeltaVolumeIsEnough = function (spotifyVolume, volumioVolume) {
     var self = this;
 
-    self.debugLog('SPOTIFY VOLUME' + spotifyVolume)
-    self.debugLog('VOLUMIO VOLUME' + volumioVolume)
+    self.debugLog('SPOTIFY VOLUME ' + spotifyVolume);
+    self.debugLog('VOLUMIO VOLUME ' + volumioVolume);
+    if (spotifyVolume === undefined) {
+        return self.alignSpotifyVolumeToVolumioVolume();
+    }
     try {
-        var isDeltaVolumeEnough = Math.abs(parseInt(spotifyVolume) - parseInt(volumioVolume)) >= 5;
+        var isDeltaVolumeEnough = Math.abs(parseInt(spotifyVolume) - parseInt(volumioVolume)) >= deltaVolumeTreshold;
         self.debugLog('DELTA VOLUME ENOUGH: ' + isDeltaVolumeEnough);
         return isDeltaVolumeEnough;
     } catch(e) {
@@ -523,16 +556,19 @@ ControllerSpotify.prototype.alignSpotifyVolumeToVolumioVolume = function () {
 
     self.logger.info('Aligning Spotify Volume to Volumio Volume');
 
-    var currentVolumioVolume = self.commandRouter.volumioretrievevolume();
-    if (currentVolumioVolume && currentVolumioVolume.vol !== undefined && currentVolumioVolume.disableVolumeContro !== true) {
-        if (currentVolumioVolume.mute === true) {
+    let state = self.commandRouter.volumioGetState();
+    let currentVolumioVolumeValue = state && state.volume ? state.volume : undefined;
+    let currentDisableVolumeControl = state && state.disableVolumeControl ? state.disableVolumeControl : undefined;
+    let currentMuteValue = state && state.mute ? state.mute : undefined;
+    if (currentVolumioVolumeValue !== undefined && currentDisableVolumeControl !== true) {
+        if (currentMuteValue === true) {
             currentVolumioVolume = 0;
         } else {
-            currentVolumioVolume = currentVolumioVolume.vol;
+            currentVolumioVolume = currentVolumioVolumeValue;
         }
         self.logger.info('Setting Spotify Volume from Volumio: ' + currentVolumioVolume);
         currentSpotifyVolume = currentVolumioVolume;
-        self.sendSpotifyLocalApiCommandWithPayload('/volume', { volume: currentSpotifyVolume });
+        self.setSpotifyDaemonVolume(currentSpotifyVolume);
     }
 };
 
@@ -597,7 +633,6 @@ ControllerSpotify.prototype.initializeLibrespotDaemon = function () {
             self.logger.info('go-librespot daemon successfully initialized');
             setTimeout(()=>{
                 self.goLibrespotDaemonWsConnection('start');
-                self.alignSpotifyVolumeToVolumioVolume();
                 defer.resolve('');
             }, 3000);
         })
@@ -2773,4 +2808,23 @@ ControllerSpotify.prototype.getSpotifyVolume = function () {
                 currentSpotifyVolume = results.body.value;
             }
         })
+};
+
+ControllerSpotify.prototype.loadVolumeMap = function () {
+    var self = this;
+
+    self.logger.info('Loading Spotify Daemon to Volumio volume map');
+    spotifyVolumeMap = fs.readJsonSync(__dirname + '/spotifyDaemonVolumeMap.json');
+};
+
+ControllerSpotify.prototype.startVolumeTimerLimit = function () {
+    var self = this;
+
+    self.logger.info('Starting Volume Timer Limit Guard');
+    if (volumeTimer !== undefined) {
+        clearInterval(volumeTimer);
+    }
+    volumeTimer = setInterval(() => {
+        apiCallsCounter = 0;
+    }, apiCallsTimespan);
 };
