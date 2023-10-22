@@ -489,6 +489,7 @@ ControllerSpotify.prototype.random = function (value) {
 };
 
 ControllerSpotify.prototype.repeat = function (value, repeatSingle) {
+    this.logger.info('Spotify Repeat: ' + value + ' - ' + repeatSingle);
     // to implement
 };
 
